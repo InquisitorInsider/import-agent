@@ -384,7 +384,9 @@ function renderDiff(r){
   if(r.nombre_distinto.length){
     h+='<div class="card"><div class="row" style="justify-content:space-between">'
       +'<h3 style="margin:0">Nombres distintos</h3>'
-      +'<button class="ghost" onclick="aplicarNombres(true)">Corregir solo los sospechosos →</button></div>'
+      +'<div class="row" style="gap:8px">'
+      +'<button class="sec" onclick="markSusp()">Marcar sospechosos</button>'
+      +'<button class="ghost" onclick="aplicarNombres()">Corregir los marcados →</button></div></div>'
       +'<div class="scroll" style="margin-top:10px"><table><thead><tr>'
       +'<th><input type=checkbox onclick="toggleAll(this)"></th><th>Celular</th>'
       +'<th>Nombre en el BOT</th><th>Nombre en el DBF</th></tr></thead><tbody>';
@@ -413,13 +415,15 @@ function esc(s){return (s||'').replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':
 function toggleAll(c){document.querySelectorAll('.cbn').forEach(x=>x.checked=c.checked);}
 function toggleAllD(c){document.querySelectorAll('.cbd').forEach(x=>x.checked=c.checked);}
 
-async function aplicarNombres(onlySusp){
+async function aplicarNombres(){
   const acciones=[];
   document.querySelectorAll('.cbn').forEach(cb=>{
     if(cb.checked){const x=lastDiff.nombre_distinto[+cb.dataset.i];
-      if(!onlySusp||x.bot_sospechoso)acciones.push({celular:x.celular,lid:x.lid,tipo:'nombre'});}});
+      acciones.push({celular:x.celular,lid:x.lid,tipo:'nombre'});}});
   await aplicar(acciones,'nombres');
 }
+function markSusp(){document.querySelectorAll('.cbn').forEach(cb=>{
+  cb.checked=!!lastDiff.nombre_distinto[+cb.dataset.i].bot_sospechoso;});}
 async function aplicarDir(){
   const acciones=[];
   document.querySelectorAll('.cbd').forEach(cb=>{
