@@ -122,8 +122,8 @@ PAGE = r"""<!doctype html>
           <div><label>Subcarpeta (opcional)</label><input id="smb_path" placeholder="domicilio"></div>
         </div>
         <div class="three">
-          <div><label>Usuario (vacío = abierto)</label><input id="smb_user"></div>
-          <div><label>Clave</label><input id="smb_pass" type="password" placeholder="(sin cambios)"></div>
+          <div><label>Usuario (vacío = abierto)</label><input id="smb_user" autocomplete="off" autocapitalize="off" spellcheck="false"></div>
+          <div><label>Clave</label><input id="smb_pass" type="password" autocomplete="new-password" placeholder="(sin cambios)"></div>
           <div><label>Dominio</label><input id="smb_domain" placeholder="WORKGROUP"></div>
         </div>
       </div>
