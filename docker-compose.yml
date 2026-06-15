@@ -1,0 +1,24 @@
+# import-agent — desarrollo / local.
+# Levanta:  docker compose up --build
+# Panel web: http://localhost:8000
+
+services:
+  import-agent:
+    build: .
+    container_name: import-agent
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    volumes:
+      - import-agent-data:/data
+      # Si usas origen LOCAL, monta aquí la carpeta con los .dbf:
+      # - ./dbf:/dbf:ro
+      # Para el panel de sincronización, monta el SQLite del bot (solo lectura
+      # para comparar; quita ':ro' si quieres aplicar correcciones):
+      # - /ruta/al/pedidos.db:/bot/pedidos.db
+
+volumes:
+  import-agent-data:
+    name: import-agent-data
