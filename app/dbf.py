@@ -112,6 +112,86 @@ def _smb_fetch(src: dict, filename: str, dest_dir: str) -> str:
     return local
 
 
+def _smb_msg(out: str) -> str:
+    """Traduce la salida cruda de smbclient a un mensaje claro para el panel."""
+    out = (out or "").strip()
+    if "NT_STATUS_LOGON_FAILURE" in out:
+        return "Credenciales rechazadas (revisa usuario, clave y dominio)."
+    if "NT_STATUS_BAD_NETWORK_NAME" in out:
+        return "El recurso compartido no existe en ese host."
+    if "NT_STATUS_ACCESS_DENIED" in out:
+        return "Acceso denegado al recurso (permisos del usuario)."
+    if ("NT_STATUS_HOST_UNREACHABLE" in out or "NT_STATUS_IO_TIMEOUT" in out
+            or "Connection to" in out or "NT_STATUS_CONNECTION_REFUSED" in out):
+        return "No se pudo conectar al host (revisa IP/red)."
+    return out or "Error desconocido de SMB."
+
+
+def _smb_ls(src: dict, remote: str):
+    """Lista un archivo remoto en el recurso SMB (sin descargarlo)."""
+    host = src.get("smb_host")
+    share = src.get("smb_share")
+    cmd = ["smbclient", f"//{host}/{share}"]
+    user = src.get("smb_user")
+    if user:
+        cmd += ["-U", f"{user}%{src.get('smb_pass', '')}"]
+    else:
+        cmd += ["-N"]
+    if src.get("smb_domain"):
+        cmd += ["-W", src["smb_domain"]]
+    if src.get("smb_ip"):
+        cmd += ["-I", src["smb_ip"]]
+    cmd += ["-c", f'ls "{remote}"']
+    return subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+
+
+def probar(src: dict) -> dict:
+    """Prueba la conexión al origen y la presencia de los dos DBF, SIN importar.
+
+    Devuelve {ok, tipo, archivos:[{nombre, existe, tamano_kb}]}.
+    Lanza DbfError con un mensaje claro si la conexión o las credenciales fallan.
+    """
+    stype = (src.get("source_type") or "smb").lower()
+    cli_name = src.get("clientes_file") or "clientesdomicilio.dbf"
+    dir_name = src.get("direcciones_file") or "direccionesdomicilio.dbf"
+    archivos: list[dict] = []
+
+    if stype == "local":
+        base = src.get("local_dir") or ""
+        for nombre in (cli_name, dir_name):
+            p = os.path.join(base, nombre)
+            ex = os.path.exists(p)
+            archivos.append({"nombre": nombre, "existe": ex,
+                             "tamano_kb": round(os.path.getsize(p) / 1024) if ex else 0})
+        faltan = [a["nombre"] for a in archivos if not a["existe"]]
+        if faltan:
+            raise DbfError(f"Carpeta '{base}' accesible, pero faltan: {', '.join(faltan)}")
+        return {"ok": True, "tipo": "local", "archivos": archivos}
+
+    # SMB
+    host = src.get("smb_host")
+    share = src.get("smb_share")
+    if not host or not share:
+        raise DbfError("Falta el host o el recurso compartido SMB.")
+    sub = (src.get("smb_path") or "").strip().strip("/").replace("/", "\\")
+    for nombre in (cli_name, dir_name):
+        remote = f"{sub}\\{nombre}" if sub else nombre
+        proc = _smb_ls(src, remote)
+        out = (proc.stdout or "") + "\n" + (proc.stderr or "")
+        # Un fallo de conexión/credenciales NO es lo mismo que "archivo no existe".
+        if proc.returncode != 0 and "NT_STATUS_NO_SUCH_FILE" not in out:
+            raise DbfError(_smb_msg(out))
+        m = re.search(re.escape(nombre) + r"\s+\w+\s+(\d+)", out)
+        archivos.append({"nombre": nombre, "existe": m is not None,
+                         "tamano_kb": round(int(m.group(1)) / 1024) if m else 0})
+    faltan = [a["nombre"] for a in archivos if not a["existe"]]
+    if faltan:
+        raise DbfError(
+            f"Conectó a //{host}/{share} pero no encontró: {', '.join(faltan)}. "
+            "Revisa la subcarpeta y los nombres de archivo.")
+    return {"ok": True, "tipo": "smb", "archivos": archivos}
+
+
 def resolve_files(src: dict, workdir: str) -> tuple[str, str]:
     """Resuelve las rutas locales de los dos DBF según el origen configurado.
 

@@ -12,6 +12,7 @@ Panel de importación (protegido con ADMIN_PASSWORD si se define):
   GET  /                       -> panel web
   GET  /api/settings           -> configuración + estado del índice
   POST /api/source             -> guardar origen DBF (local o SMB)
+  POST /api/source/probar      -> probar conexión al origen (sin importar)
   POST /api/globals            -> guardar bot_db_path / lookup_token / encoding
   POST /api/importar           -> importación masiva (DBF -> índice limpio)
   GET  /api/clientes           -> listar/buscar en el índice
@@ -107,6 +108,17 @@ def api_source(payload: dict, _: None = Depends(require_admin)) -> dict:
 def api_globals(payload: dict, _: None = Depends(require_admin)) -> dict:
     settings.save_globals(payload)
     return api_settings()
+
+
+@app.post("/api/source/probar")
+def api_source_probar(_: None = Depends(require_admin)) -> dict:
+    """Prueba la conexión al origen DBF guardado, sin importar nada."""
+    try:
+        return dbf.probar(settings.source())
+    except dbf.DbfError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=500, detail=f"Error probando la conexión: {e}")
 
 
 @app.post("/api/importar")

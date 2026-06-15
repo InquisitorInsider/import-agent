@@ -108,37 +108,15 @@ PAGE = r"""<!doctype html>
 
   <!-- IMPORTACIONES -->
   <section id="t-importar" class="hide">
-    <h2>Origen de los datos (DBF)</h2>
     <div class="card">
-      <label>Tipo de origen</label>
-      <select id="src_type" onchange="toggleSrc()">
-        <option value="smb">Carpeta compartida en red (SMB)</option>
-        <option value="local">Carpeta local / volumen montado</option>
-      </select>
-      <div id="src_smb">
-        <div class="three">
-          <div><label>Host / IP (SMB)</label><input id="smb_host" placeholder="192.168.1.X"></div>
-          <div><label>Recurso compartido</label><input id="smb_share" placeholder="DATOS"></div>
-          <div><label>Subcarpeta (opcional)</label><input id="smb_path" placeholder="domicilio"></div>
-        </div>
-        <div class="three">
-          <div><label>Usuario (vacío = abierto)</label><input id="smb_user" autocomplete="off" autocapitalize="off" spellcheck="false"></div>
-          <div><label>Clave</label><input id="smb_pass" type="password" autocomplete="new-password" placeholder="(sin cambios)"></div>
-          <div><label>Dominio</label><input id="smb_domain" placeholder="WORKGROUP"></div>
-        </div>
+      <div class="row" style="justify-content:space-between">
+        <span class="muted">Origen de datos: <b id="imp-src-label">—</b></span>
+        <span id="imp-src-chip" class="chip">sin probar</span>
       </div>
-      <div id="src_local" class="hide">
-        <label>Carpeta dentro del contenedor</label>
-        <input id="local_dir" placeholder="/dbf">
-      </div>
-      <div class="two">
-        <div><label>Archivo de clientes</label><input id="clientes_file" placeholder="clientesdomicilio.dbf"></div>
-        <div><label>Archivo de direcciones</label><input id="direcciones_file" placeholder="direccionesdomicilio.dbf"></div>
-      </div>
-      <div class="row" style="margin-top:12px">
-        <button class="sec" onclick="saveSource()">Guardar origen</button>
-        <span class="muted">Solo lectura: el agente nunca escribe en el DBF.</span>
-      </div>
+      <p class="muted" style="font-size:13px;margin:10px 0 0">
+        El origen DBF se define y se prueba en la pestaña
+        <a href="#" onclick="goTab('config');return false">Configuración</a>.
+        Conviene probar la conexión antes de importar.</p>
     </div>
 
     <h2>Módulos de importación</h2>
@@ -211,6 +189,42 @@ PAGE = r"""<!doctype html>
 
   <!-- CONFIG -->
   <section id="t-config" class="hide">
+    <h2>Origen de los datos (DBF)</h2>
+    <div class="card">
+      <label>Tipo de origen</label>
+      <select id="src_type" onchange="toggleSrc()">
+        <option value="smb">Carpeta compartida en red (SMB)</option>
+        <option value="local">Carpeta local / volumen montado</option>
+      </select>
+      <div id="src_smb">
+        <div class="three">
+          <div><label>Host / IP (SMB)</label><input id="smb_host" placeholder="192.168.1.X"></div>
+          <div><label>Recurso compartido</label><input id="smb_share" placeholder="DATOS"></div>
+          <div><label>Subcarpeta (opcional)</label><input id="smb_path" placeholder="domicilio"></div>
+        </div>
+        <div class="three">
+          <div><label>Usuario (vacío = abierto)</label><input id="smb_user" autocomplete="off" autocapitalize="off" spellcheck="false"></div>
+          <div><label>Clave</label><input id="smb_pass" type="password" autocomplete="new-password" placeholder="(sin cambios)"></div>
+          <div><label>Dominio</label><input id="smb_domain" placeholder="WORKGROUP"></div>
+        </div>
+      </div>
+      <div id="src_local" class="hide">
+        <label>Carpeta dentro del contenedor</label>
+        <input id="local_dir" placeholder="/dbf">
+      </div>
+      <div class="two">
+        <div><label>Archivo de clientes</label><input id="clientes_file" placeholder="clientesdomicilio.dbf"></div>
+        <div><label>Archivo de direcciones</label><input id="direcciones_file" placeholder="direccionesdomicilio.dbf"></div>
+      </div>
+      <div class="row" style="margin-top:12px">
+        <button class="sec" onclick="saveSource()">Guardar origen</button>
+        <button class="ghost" id="btn-probar" onclick="probarConexion()">Probar conexión</button>
+        <span id="probar-state" class="chip">—</span>
+        <span class="muted">Solo lectura: el agente nunca escribe en el DBF.</span>
+      </div>
+      <div id="probar-result"></div>
+    </div>
+
     <div class="card">
       <h3 style="margin:0 0 8px">Conexión con el bot</h3>
       <label>Ruta del SQLite del bot (montado en el contenedor)</label>
@@ -240,12 +254,13 @@ async function api(path,opts){const r=await fetch(path,opts);
     throw new Error(d||('HTTP '+r.status));} return r.json();}
 
 // tabs
-document.querySelectorAll('.tabs button').forEach(b=>b.onclick=()=>{
-  document.querySelectorAll('.tabs button').forEach(x=>x.classList.remove('active'));
-  b.classList.add('active');
+function goTab(name){
+  document.querySelectorAll('.tabs button').forEach(x=>
+    x.classList.toggle('active',x.dataset.tab===name));
   ['resumen','importar','buscar','sync','config'].forEach(t=>
-    $('t-'+t).classList.toggle('hide',t!==b.dataset.tab));
-});
+    $('t-'+t).classList.toggle('hide',t!==name));
+}
+document.querySelectorAll('.tabs button').forEach(b=>b.onclick=()=>goTab(b.dataset.tab));
 
 function toggleSrc(){const v=$('src_type').value;
   $('src_smb').classList.toggle('hide',v!=='smb');
@@ -258,6 +273,9 @@ function fillSettings(){
   $('smb_path').value=s.smb_path||''; $('smb_user').value=s.smb_user||'';
   $('smb_domain').value=s.smb_domain||'WORKGROUP'; $('local_dir').value=s.local_dir||'';
   $('clientes_file').value=s.clientes_file||''; $('direcciones_file').value=s.direcciones_file||'';
+  $('imp-src-label').textContent = (s.source_type==='local')
+    ? ('local · '+(s.local_dir||'—'))
+    : ('//'+(s.smb_host||'—')+'/'+(s.smb_share||'')+(s.smb_path?'/'+s.smb_path:''));
   $('bot_db_path').value=S.bot_db_path||''; $('dbf_encoding').value=S.dbf_encoding||'cp1252';
   $('m-digits').textContent=S.phone_digits;
   // resumen
@@ -272,13 +290,33 @@ function fillSettings(){
 }
 async function load(){S=await api('/api/settings');fillSettings();listar();}
 
-async function saveSource(){
+async function saveSource(quiet){
   const p={source_type:$('src_type').value,smb_host:$('smb_host').value,
     smb_share:$('smb_share').value,smb_path:$('smb_path').value,smb_user:$('smb_user').value,
     smb_pass:$('smb_pass').value,smb_domain:$('smb_domain').value,local_dir:$('local_dir').value,
     clientes_file:$('clientes_file').value,direcciones_file:$('direcciones_file').value};
   S=await api('/api/source',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(p)});
-  fillSettings();toast('Origen guardado');}
+  fillSettings();if(!quiet)toast('Origen guardado');}
+
+async function probarConexion(){
+  $('btn-probar').disabled=true;
+  $('probar-state').textContent='probando…';$('probar-state').className='chip';
+  $('probar-result').innerHTML='';
+  try{
+    await saveSource(true);                       // prueba lo que está en el formulario
+    const r=await api('/api/source/probar',{method:'POST'});
+    $('probar-state').textContent='conexión OK';$('probar-state').className='chip ok';
+    $('imp-src-chip').textContent='conexión OK';$('imp-src-chip').className='chip ok';
+    $('probar-result').innerHTML='<div class="grid" style="margin-top:12px">'
+      +r.archivos.map(a=>stat(a.existe?(a.tamano_kb.toLocaleString()+' KB'):'no está',a.nombre)).join('')
+      +'</div>';
+    toast('Conexión correcta');
+  }catch(e){
+    $('probar-state').textContent='falló';$('probar-state').className='chip bad';
+    $('imp-src-chip').textContent='conexión falló';$('imp-src-chip').className='chip bad';
+    $('probar-result').innerHTML='<p class="chip bad" style="margin-top:10px">'+e.message+'</p>';
+  }
+  $('btn-probar').disabled=false;}
 
 async function saveGlobals(){
   const p={bot_db_path:$('bot_db_path').value,dbf_encoding:$('dbf_encoding').value};
