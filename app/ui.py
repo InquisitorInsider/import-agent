@@ -230,8 +230,22 @@ PAGE = r"""<!doctype html>
       <label>Ruta del SQLite del bot (montado en el contenedor)</label>
       <input id="bot_db_path" placeholder="/bot/pedidos.db">
       <p class="muted" style="font-size:13px">Solo se usa para el panel de sincronización. La búsqueda en runtime no lo necesita.</p>
-      <label>Token para que el bot consulte (opcional)</label>
-      <input id="lookup_token" type="password" placeholder="(sin cambios)">
+      <label>Token para que el bot consulte (Authorization: Bearer)</label>
+      <input id="lookup_token" type="password" autocomplete="new-password" placeholder="(sin cambios)">
+      <div class="row" style="margin-top:8px">
+        <button class="ghost" onclick="generarToken()">Generar token nuevo</button>
+        <button class="sec" onclick="verToken()">Mostrar token actual</button>
+      </div>
+      <div id="token-box" class="hide" style="margin-top:10px">
+        <label>Token — cópialo y ponlo en el bot como <code>IMPORT_TOKEN</code>:</label>
+        <div class="row">
+          <input id="token-val" readonly onclick="this.select()" style="max-width:420px">
+          <button class="sec" onclick="copiarToken()">Copiar</button>
+        </div>
+        <p class="muted" style="font-size:12.5px;margin:6px 0 0">
+          Si generas uno nuevo, el bot dejará de conectar hasta que actualices su
+          <code>IMPORT_TOKEN</code> con este valor.</p>
+      </div>
       <label>Codificación del DBF</label>
       <input id="dbf_encoding" placeholder="cp1252">
       <div class="row" style="margin-top:12px"><button class="sec" onclick="saveGlobals()">Guardar</button></div>
@@ -323,6 +337,22 @@ async function saveGlobals(){
   if($('lookup_token').value)p.lookup_token=$('lookup_token').value;
   S=await api('/api/globals',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(p)});
   fillSettings();toast('Configuración guardada');}
+
+async function generarToken(){
+  if(!confirm('Se generará un token NUEVO y reemplazará al anterior. El bot dejará de conectar hasta que lo actualices con este valor. ¿Continuar?'))return;
+  try{const r=await api('/api/token/generar',{method:'POST'});
+    mostrarToken(r.token);toast('Token generado y guardado');
+  }catch(e){toast('Error: '+e.message);}}
+async function verToken(){
+  try{const r=await api('/api/token');
+    if(!r.token){toast('Aún no hay token configurado');return;}
+    mostrarToken(r.token);
+  }catch(e){toast('Error: '+e.message);}}
+function mostrarToken(t){$('token-val').value=t;$('token-box').classList.remove('hide');}
+function copiarToken(){const i=$('token-val');i.select();
+  if(navigator.clipboard){navigator.clipboard.writeText(i.value)
+    .then(()=>toast('Token copiado')).catch(()=>toast('Copia manual: selecciona y Ctrl+C'));}
+  else{try{document.execCommand('copy');toast('Token copiado');}catch(e){toast('Copia manual: Ctrl+C');}}}
 
 async function importar(){
   $('btn-imp').disabled=true;$('imp-state').textContent='importando…';

@@ -14,6 +14,8 @@ Panel de importación (protegido con ADMIN_PASSWORD si se define):
   POST /api/source             -> guardar origen DBF (local o SMB)
   POST /api/source/probar      -> probar conexión al origen (sin importar)
   POST /api/globals            -> guardar bot_db_path / lookup_token / encoding
+  POST /api/token/generar      -> generar token seguro para el bot (lo guarda)
+  GET  /api/token              -> ver el token actual (en claro)
   POST /api/importar           -> importación masiva (DBF -> índice limpio)
   GET  /api/clientes           -> listar/buscar en el índice
   GET  /api/sync/diff          -> comparar índice (DBF) vs clientes del bot
@@ -108,6 +110,20 @@ def api_source(payload: dict, _: None = Depends(require_admin)) -> dict:
 def api_globals(payload: dict, _: None = Depends(require_admin)) -> dict:
     settings.save_globals(payload)
     return api_settings()
+
+
+@app.post("/api/token/generar")
+def api_token_generar(_: None = Depends(require_admin)) -> dict:
+    """Genera un token seguro nuevo para el bot, lo guarda y lo devuelve en claro."""
+    token = secrets.token_urlsafe(24)
+    settings.save_globals({"lookup_token": token})
+    return {"token": token}
+
+
+@app.get("/api/token")
+def api_token_ver(_: None = Depends(require_admin)) -> dict:
+    """Devuelve el token actual en claro (panel protegido por ADMIN_PASSWORD)."""
+    return {"token": settings.lookup_token()}
 
 
 @app.post("/api/source/probar")
