@@ -69,8 +69,8 @@ las direcciones huérfanas).
 
 ## Despliegue en OMV
 
-Usa `docker-compose.omv.yml` (variables inline). Publica en **`8094:8000`**
-(el 8000 ya está ocupado en tu OMV) → `http://IP_OMV:8094`. Se une a la red
+Usa `docker-compose.omv.yml` (variables inline). Publica en **`8095:8000`**
+(el 8000 ya está ocupado en tu OMV) → `http://IP_OMV:8095`. Se une a la red
 `pos-net` para que el bot lo llame por `http://import-agent:8000`.
 
 1. En **Services → Compose → Files → Add (+)**, pega `docker-compose.omv.yml`.
