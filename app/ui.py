@@ -88,6 +88,7 @@ PAGE = r"""<!doctype html>
     <button data-tab="importar">Importaciones</button>
     <button data-tab="buscar">Buscar (prueba)</button>
     <button data-tab="sync">Sincronizar con el bot</button>
+    <button data-tab="factura">Facturación</button>
     <button data-tab="config">Configuración</button>
   </div>
 
@@ -255,6 +256,90 @@ PAGE = r"""<!doctype html>
       <pre id="snippet"></pre>
     </div>
   </section>
+
+  <!-- FACTURACION -->
+  <section id="t-factura" class="hide">
+    <p class="muted">Todo esto es editable: si SUNAT cambia tasas, series o códigos, lo ajustas aquí
+      sin tocar el código. Es la base con la que el importador armará la boleta/factura.</p>
+
+    <h2>Datos del emisor</h2>
+    <div class="card">
+      <div class="two">
+        <div><label>RUC</label><input id="fc_ruc" placeholder="20XXXXXXXXX"></div>
+        <div><label>Razón social</label><input id="fc_razon_social"></div>
+      </div>
+      <div class="two">
+        <div><label>Nombre comercial</label><input id="fc_nombre_comercial"></div>
+        <div><label>Domicilio fiscal</label><input id="fc_domicilio_fiscal"></div>
+      </div>
+      <div class="three">
+        <div><label>Ubigeo</label><input id="fc_ubigeo" placeholder="150101"></div>
+        <div><label>Distrito</label><input id="fc_distrito"></div>
+        <div><label>Provincia</label><input id="fc_provincia"></div>
+      </div>
+      <div class="three">
+        <div><label>Departamento</label><input id="fc_departamento"></div>
+        <div><label>Serie boleta</label><input id="fc_serie_boleta" placeholder="B001"></div>
+        <div><label>Serie factura</label><input id="fc_serie_factura" placeholder="F001"></div>
+      </div>
+      <div class="three">
+        <div><label>Moneda</label><input id="fc_moneda" placeholder="PEN"></div>
+      </div>
+    </div>
+
+    <h2>IGV por rango de fechas (cálculo inverso)</h2>
+    <div class="card">
+      <p class="muted" style="font-size:13px;margin-top:0">El total = IGV + IPM. La base se calcula
+        <code>base = TOTAL ÷ (1 + (IGV+IPM)/100)</code> según la fecha de la venta.</p>
+      <div class="scroll" style="max-height:none">
+        <table><thead><tr><th>Desde (YYYY-MM-DD)</th><th>Hasta</th><th>IGV %</th><th>IPM %</th>
+          <th>Total %</th><th></th></tr></thead>
+          <tbody id="fc-reglas"></tbody></table>
+      </div>
+      <div class="row" style="margin-top:10px"><button class="sec" onclick="addRegla()">+ Agregar regla</button></div>
+    </div>
+
+    <h2>Formas de pago (control interno, no van a SUNAT)</h2>
+    <div class="card">
+      <p class="muted" style="font-size:13px;margin-top:0">Mapea el código del POS a un nombre legible.
+        Para la boleta/factura todo es <b>Contado</b>; esto es solo para el cuadre bancario.</p>
+      <div class="scroll" style="max-height:none">
+        <table><thead><tr><th>Código POS</th><th>Nombre</th><th></th></tr></thead>
+          <tbody id="fc-pagos"></tbody></table>
+      </div>
+      <div class="row" style="margin-top:10px"><button class="sec" onclick="addPago()">+ Agregar forma de pago</button></div>
+    </div>
+
+    <h2>Catálogos SUNAT</h2>
+    <div class="card">
+      <div class="three">
+        <div><label>Tipo boleta</label><input id="fc_tipo_boleta" placeholder="03"></div>
+        <div><label>Tipo factura</label><input id="fc_tipo_factura" placeholder="01"></div>
+        <div><label>Afectación IGV</label><input id="fc_afectacion_igv" placeholder="10"></div>
+      </div>
+      <div class="three">
+        <div><label>Unidad de medida</label><input id="fc_unidad_medida" placeholder="NIU"></div>
+        <div><label>Doc. DNI</label><input id="fc_doc_dni" placeholder="1"></div>
+        <div><label>Doc. RUC</label><input id="fc_doc_ruc" placeholder="6"></div>
+      </div>
+      <div class="three">
+        <div><label>Doc. sin documento</label><input id="fc_doc_sin" placeholder="0"></div>
+        <div><label>Forma de pago SUNAT</label><input id="fc_forma_pago_sunat" placeholder="Contado"></div>
+        <div><label>Umbral DNI en boleta (S/)</label><input id="fc_umbral_dni_boleta" placeholder="700"></div>
+      </div>
+      <div class="row" style="margin-top:12px">
+        <button onclick="saveFactura()">Guardar configuración</button>
+        <span id="fc-state" class="chip">—</span>
+      </div>
+    </div>
+
+    <h2>Contrato de salida (lo que devolverá el importador)</h2>
+    <div class="card">
+      <p class="muted" style="font-size:13px;margin-top:0">Ejemplo del JSON estándar que el facturador
+        recibirá por <code>/facturacion/folio/{n}</code>. Se construye en el Paso 3.</p>
+      <pre id="fc-contrato"></pre>
+    </div>
+  </section>
 </main>
 <div id="toast"></div>
 
@@ -267,11 +352,88 @@ async function api(path,opts){const r=await fetch(path,opts);
   if(!r.ok){let d='';try{d=(await r.json()).detail}catch(e){}
     throw new Error(d||('HTTP '+r.status));} return r.json();}
 
+// ── Facturación (config editable) ──
+let FC=null;
+const FC_CONTRATO=`{
+  "tipo_comprobante": "03",              // 03 boleta · 01 factura (según cliente)
+  "serie": "B001", "correlativo": 1,     // numeración propia (no la del POS)
+  "fecha_emision": "2026-06-15T16:37:00",
+  "moneda": "PEN",
+  "numcheque_pos": 65271,                // folio cuenta: referencia + anti-duplicidad
+  "cliente": { "tipo_doc": "1", "num_doc": "", "nombre": "VARIOS" },
+  "items": [
+    { "codigo": "0306", "descripcion": "CHURRASCO A LA PARRILLA",
+      "cantidad": 1, "unidad": "NIU",
+      "valor_unitario": 23.98, "precio_unitario": 26.50,
+      "afectacion_igv": "10", "valor_venta": 23.98, "igv": 2.52 }
+  ],
+  "totales": { "gravadas": 54.66, "igv": 4.37, "ipm": 1.37,
+               "importe_total": 60.40, "en_letras": "SESENTA Y 40/100 SOLES" },
+  "forma_pago": "Contado",
+  "medio_pago_interno": [ { "codigo": "MC", "nombre": "Izipay", "importe": 60.40 } ],
+  "anulado": false, "ya_facturado": false
+}`;
+async function loadFactura(){
+  FC=await api('/api/facturacion');
+  const e=FC.emisor||{}, s=FC.series||{}, c=FC.catalogos||{};
+  const set=(id,v)=>{if($(id))$(id).value=(v!=null?v:'');};
+  set('fc_ruc',e.ruc);set('fc_razon_social',e.razon_social);set('fc_nombre_comercial',e.nombre_comercial);
+  set('fc_domicilio_fiscal',e.domicilio_fiscal);set('fc_ubigeo',e.ubigeo);set('fc_distrito',e.distrito);
+  set('fc_provincia',e.provincia);set('fc_departamento',e.departamento);
+  set('fc_serie_boleta',s.boleta||'B001');set('fc_serie_factura',s.factura||'F001');set('fc_moneda',FC.moneda||'PEN');
+  set('fc_tipo_boleta',c.tipo_boleta);set('fc_tipo_factura',c.tipo_factura);set('fc_afectacion_igv',c.afectacion_igv);
+  set('fc_unidad_medida',c.unidad_medida);set('fc_doc_dni',c.doc_dni);set('fc_doc_ruc',c.doc_ruc);set('fc_doc_sin',c.doc_sin);
+  set('fc_forma_pago_sunat',c.forma_pago_sunat);set('fc_umbral_dni_boleta',c.umbral_dni_boleta);
+  renderReglas(FC.igv_reglas||[]);renderPagos(FC.formas_pago||[]);
+  $('fc-contrato').textContent=FC_CONTRATO;
+}
+function esc2(s){return String(s==null?'':s).replace(/"/g,'&quot;');}
+function reglaRow(r){r=r||{};const tot=((+r.igv||0)+(+r.ipm||0)).toFixed(1);return '<tr>'
+  +'<td><input class="rg-desde" value="'+esc2(r.desde)+'" placeholder="2026-01-01" style="min-width:120px"></td>'
+  +'<td><input class="rg-hasta" value="'+esc2(r.hasta)+'" placeholder="2026-12-31" style="min-width:120px"></td>'
+  +'<td><input class="rg-igv" type="number" step="0.1" value="'+esc2(r.igv)+'" style="max-width:80px" oninput="recalcTot(this)"></td>'
+  +'<td><input class="rg-ipm" type="number" step="0.1" value="'+esc2(r.ipm)+'" style="max-width:80px" oninput="recalcTot(this)"></td>'
+  +'<td class="rg-tot muted">'+tot+'%</td>'
+  +'<td><button class="sec" onclick="this.closest(\'tr\').remove()">✕</button></td></tr>';}
+function renderReglas(list){$('fc-reglas').innerHTML=(list&&list.length?list:[{}]).map(reglaRow).join('');}
+function addRegla(){$('fc-reglas').insertAdjacentHTML('beforeend',reglaRow());}
+function recalcTot(inp){const tr=inp.closest('tr');
+  const igv=+tr.querySelector('.rg-igv').value||0, ipm=+tr.querySelector('.rg-ipm').value||0;
+  tr.querySelector('.rg-tot').textContent=(igv+ipm).toFixed(1)+'%';}
+function pagoRow(p){p=p||{};return '<tr>'
+  +'<td><input class="pg-cod" value="'+esc2(p.codigo)+'" style="max-width:120px"></td>'
+  +'<td><input class="pg-nom" value="'+esc2(p.nombre)+'"></td>'
+  +'<td><button class="sec" onclick="this.closest(\'tr\').remove()">✕</button></td></tr>';}
+function renderPagos(list){$('fc-pagos').innerHTML=(list&&list.length?list:[{}]).map(pagoRow).join('');}
+function addPago(){$('fc-pagos').insertAdjacentHTML('beforeend',pagoRow());}
+async function saveFactura(){
+  const reglas=[...document.querySelectorAll('#fc-reglas tr')].map(tr=>({
+    desde:tr.querySelector('.rg-desde').value.trim(),hasta:tr.querySelector('.rg-hasta').value.trim(),
+    igv:+tr.querySelector('.rg-igv').value||0,ipm:+tr.querySelector('.rg-ipm').value||0})).filter(r=>r.desde);
+  const pagos=[...document.querySelectorAll('#fc-pagos tr')].map(tr=>({
+    codigo:tr.querySelector('.pg-cod').value.trim(),nombre:tr.querySelector('.pg-nom').value.trim()})).filter(p=>p.codigo);
+  const v=id=>$(id).value;
+  const payload={
+    emisor:{ruc:v('fc_ruc'),razon_social:v('fc_razon_social'),nombre_comercial:v('fc_nombre_comercial'),
+      domicilio_fiscal:v('fc_domicilio_fiscal'),ubigeo:v('fc_ubigeo'),distrito:v('fc_distrito'),
+      provincia:v('fc_provincia'),departamento:v('fc_departamento')},
+    series:{boleta:v('fc_serie_boleta'),factura:v('fc_serie_factura')},
+    moneda:v('fc_moneda'),igv_reglas:reglas,formas_pago:pagos,
+    catalogos:{tipo_boleta:v('fc_tipo_boleta'),tipo_factura:v('fc_tipo_factura'),
+      afectacion_igv:v('fc_afectacion_igv'),unidad_medida:v('fc_unidad_medida'),
+      doc_dni:v('fc_doc_dni'),doc_ruc:v('fc_doc_ruc'),doc_sin:v('fc_doc_sin'),
+      forma_pago_sunat:v('fc_forma_pago_sunat'),umbral_dni_boleta:+v('fc_umbral_dni_boleta')||0}};
+  try{FC=await api('/api/facturacion',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+    renderReglas(FC.igv_reglas);renderPagos(FC.formas_pago);
+    $('fc-state').textContent='guardado';$('fc-state').className='chip ok';toast('Configuración de facturación guardada');
+  }catch(e){$('fc-state').textContent='error';$('fc-state').className='chip bad';toast('Error: '+e.message);}
+}
+
 // tabs
 function goTab(name){
   document.querySelectorAll('.tabs button').forEach(x=>
     x.classList.toggle('active',x.dataset.tab===name));
-  ['resumen','importar','buscar','sync','config'].forEach(t=>
+  ['resumen','importar','buscar','sync','factura','config'].forEach(t=>
     $('t-'+t).classList.toggle('hide',t!==name));
 }
 document.querySelectorAll('.tabs button').forEach(b=>b.onclick=()=>goTab(b.dataset.tab));
@@ -302,7 +464,7 @@ function fillSettings(){
      ' · '+u.direcciones_huerfanas_omitidas+' direcciones huérfanas omitidas':'')):'—';
   $('snippet').textContent=BOT_SNIPPET;
 }
-async function load(){S=await api('/api/settings');fillSettings();listar();}
+async function load(){S=await api('/api/settings');fillSettings();listar();loadFactura().catch(()=>{});}
 
 async function saveSource(quiet){
   const p={source_type:$('src_type').value,smb_host:$('smb_host').value,

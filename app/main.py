@@ -16,6 +16,8 @@ Panel de importación (protegido con ADMIN_PASSWORD si se define):
   POST /api/globals            -> guardar bot_db_path / lookup_token / encoding
   POST /api/token/generar      -> generar token seguro para el bot (lo guarda)
   GET  /api/token              -> ver el token actual (en claro)
+  GET  /api/facturacion        -> config de facturación electrónica
+  POST /api/facturacion        -> guardar config de facturación (editable web)
   POST /api/importar           -> importación masiva (DBF -> índice limpio)
   GET  /api/clientes           -> listar/buscar en el índice
   GET  /api/sync/diff          -> comparar índice (DBF) vs clientes del bot
@@ -110,6 +112,18 @@ def api_source(payload: dict, _: None = Depends(require_admin)) -> dict:
 def api_globals(payload: dict, _: None = Depends(require_admin)) -> dict:
     settings.save_globals(payload)
     return api_settings()
+
+
+@app.get("/api/facturacion")
+def api_facturacion_get(_: None = Depends(require_admin)) -> dict:
+    """Config de facturación electrónica (emisor, series, IGV por fecha, etc.)."""
+    return settings.facturacion()
+
+
+@app.post("/api/facturacion")
+def api_facturacion_set(payload: dict, _: None = Depends(require_admin)) -> dict:
+    settings.save_facturacion(payload)
+    return settings.facturacion()
 
 
 @app.post("/api/token/generar")
