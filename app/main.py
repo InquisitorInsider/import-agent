@@ -150,6 +150,20 @@ def api_importar(_: None = Depends(require_admin)) -> dict:
     return {"ok": True, "resumen": resumen, "dbf_stats": data["stats"]}
 
 
+@app.get("/api/clientes/buscar")
+def api_clientes_buscar(celular: str, _: None = Depends(require_admin)) -> dict:
+    """Igual que /clientes/buscar pero protegido por el login del panel (no por el
+    token del bot). Lo usa la pestaña 'Buscar (prueba)' del panel."""
+    cel = dbf.normalize_phone(celular)
+    if not cel:
+        raise HTTPException(status_code=400,
+                            detail=f"celular inválido (se esperan {config.PHONE_DIGITS} dígitos)")
+    cli = store.buscar_cliente(cel)
+    if not cli:
+        raise HTTPException(status_code=404, detail="cliente no encontrado")
+    return {"encontrado": True, "celular": cel, **cli}
+
+
 @app.get("/api/clientes")
 def api_clientes(limit: int = 50, offset: int = 0, q: str = "",
                  _: None = Depends(require_admin)) -> dict:

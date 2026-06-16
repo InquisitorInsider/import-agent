@@ -376,7 +376,7 @@ function stat(n,l){return '<div class="stat"><div class="n">'+n+'</div><div clas
 
 async function buscar(){
   const cel=$('q-cel').value.trim();if(!cel)return;
-  try{const r=await api('/clientes/buscar?celular='+encodeURIComponent(cel));
+  try{const r=await api('/api/clientes/buscar?celular='+encodeURIComponent(cel));
     let h='<div class="card" style="background:var(--panel2)"><b>'+r.nombre+'</b> '
       +'<span class="chip ok">'+r.celular+'</span>';
     if(r.direcciones.length){h+='<ul>';r.direcciones.forEach(d=>{h+='<li>'+(d.calle||'')
