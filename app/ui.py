@@ -333,10 +333,24 @@ PAGE = r"""<!doctype html>
       </div>
     </div>
 
+    <h2>Probar con datos reales</h2>
+    <div class="card">
+      <p class="muted" style="font-size:13px;margin-top:0">Mete un folio (NUMCHEQUE) o una fecha y mira
+        el comprobante que devolverá el importador. Busca en turno vigente y cerrado.</p>
+      <div class="row">
+        <input id="fc-folio" placeholder="N° de folio, ej. 65271" style="max-width:240px">
+        <button onclick="probarFolio()">Ver comprobante</button>
+        <input id="fc-fecha" placeholder="hoy o 2026-06-15" style="max-width:200px">
+        <button class="sec" onclick="probarFecha()">Ver ventas del día</button>
+      </div>
+      <div id="fc-prueba-info" class="muted" style="margin-top:10px"></div>
+      <pre id="fc-prueba"></pre>
+    </div>
+
     <h2>Contrato de salida (lo que devolverá el importador)</h2>
     <div class="card">
       <p class="muted" style="font-size:13px;margin-top:0">Ejemplo del JSON estándar que el facturador
-        recibirá por <code>/facturacion/folio/{n}</code>. Se construye en el Paso 3.</p>
+        recibirá por <code>/facturacion/folio/{n}</code>.</p>
       <pre id="fc-contrato"></pre>
     </div>
   </section>
@@ -427,6 +441,29 @@ async function saveFactura(){
     renderReglas(FC.igv_reglas);renderPagos(FC.formas_pago);
     $('fc-state').textContent='guardado';$('fc-state').className='chip ok';toast('Configuración de facturación guardada');
   }catch(e){$('fc-state').textContent='error';$('fc-state').className='chip bad';toast('Error: '+e.message);}
+}
+async function probarFolio(){
+  const n=$('fc-folio').value.trim();if(!n)return;
+  $('fc-prueba-info').textContent='consultando…';$('fc-prueba').textContent='';
+  try{const c=await api('/api/facturacion/folio/'+encodeURIComponent(n));
+    $('fc-prueba-info').innerHTML='Folio <b>'+c.numcheque_pos+'</b> · '
+      +(c.tipo_comprobante==='03'?'Boleta':'Factura')+' '+c.serie
+      +' · '+(c.origen==='vigente'?'turno vigente':'cerrado')
+      +' · total S/ '+c.totales.importe_total
+      +(c.anulado?' · <span class="susp">ANULADO</span>':'')
+      +(c.ya_facturado?' · <span class="susp">YA FACTURADO</span>':'');
+    $('fc-prueba').textContent=JSON.stringify(c,null,2);
+  }catch(e){$('fc-prueba-info').innerHTML='<span class="chip bad">'+e.message+'</span>';$('fc-prueba').textContent='';}
+}
+async function probarFecha(){
+  const f=$('fc-fecha').value.trim()||'hoy';
+  $('fc-prueba-info').textContent='consultando…';$('fc-prueba').textContent='';
+  try{const r=await api('/api/facturacion/ventas?fecha='+encodeURIComponent(f));
+    $('fc-prueba-info').innerHTML='<b>'+r.total+'</b> venta(s) el '+r.fecha;
+    $('fc-prueba').textContent=JSON.stringify(r.comprobantes.map(c=>({folio:c.numcheque_pos,
+      tipo:c.tipo_comprobante,serie:c.serie,total:c.totales.importe_total,
+      origen:c.origen,ya_facturado:c.ya_facturado})),null,2);
+  }catch(e){$('fc-prueba-info').innerHTML='<span class="chip bad">'+e.message+'</span>';$('fc-prueba').textContent='';}
 }
 
 // tabs

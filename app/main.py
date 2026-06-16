@@ -8,6 +8,12 @@ API para el WhatsApp bot (runtime):
                                                LOOKUP_TOKEN está configurado)
   GET  /health                             -> salud del servicio + conteos
 
+API para el facturador (runtime, mismo token Bearer):
+  GET  /facturacion/folio/{numcheque}      -> una venta en estándar SUNAT
+  GET  /facturacion/ventas?fecha=hoy       -> todas las ventas del día
+  GET  /facturacion/pendientes?fecha=hoy   -> ventas válidas no facturadas
+  POST /facturacion/marcar                 -> marcar una venta como ya emitida
+
 Panel de importación (protegido con ADMIN_PASSWORD si se define):
   GET  /                       -> panel web
   GET  /api/settings           -> configuración + estado del índice
@@ -25,14 +31,18 @@ Panel de importación (protegido con ADMIN_PASSWORD si se define):
 """
 from __future__ import annotations
 
+import os
 import secrets
+from datetime import date, datetime
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query
 from fastapi.responses import HTMLResponse
 
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 
-from . import botdb, config, dbf, settings, store, sync, ui
+from . import botdb, config, dbf, facturacion, settings, store, sync, ui
+
+_FACT_CACHE = os.path.join(config.DATA_DIR, "fact_cache")
 
 app = FastAPI(title="import-agent", version="1.0.0", docs_url="/docs")
 _basic = HTTPBasic(auto_error=False)
@@ -124,6 +134,98 @@ def api_facturacion_get(_: None = Depends(require_admin)) -> dict:
 def api_facturacion_set(payload: dict, _: None = Depends(require_admin)) -> dict:
     settings.save_facturacion(payload)
     return settings.facturacion()
+
+
+# ============================================================
+#  Facturación electrónica — lectura de ventas en estándar SUNAT
+# ============================================================
+def _fact_base() -> str:
+    return facturacion.resolver_cache(settings.source(), _FACT_CACHE)
+
+
+def _build_comprobante(numcheque: int) -> dict:
+    enc = settings.dbf_encoding()
+    base = _fact_base()
+    prods = facturacion.cargar_productos(os.path.join(base, "productos.dbf"), enc)
+    venta = facturacion.leer_venta(base, numcheque, enc)
+    if not venta:
+        raise HTTPException(status_code=404, detail="venta (folio) no encontrada")
+    comp = facturacion.construir_comprobante(venta, prods, settings.facturacion())
+    comp["ya_facturado"] = store.esta_facturada(numcheque)
+    return comp
+
+
+def _parse_fecha(fecha: str) -> date:
+    f = (fecha or "hoy").strip().lower()
+    if f in ("hoy", "today", ""):
+        return datetime.now().date()
+    try:
+        return datetime.strptime(f, "%Y-%m-%d").date()
+    except ValueError:
+        raise HTTPException(status_code=400, detail="fecha inválida (use YYYY-MM-DD o 'hoy')")
+
+
+def _comprobantes_dia(fecha: str) -> dict:
+    dia = _parse_fecha(fecha)
+    enc = settings.dbf_encoding()
+    base = _fact_base()
+    prods = facturacion.cargar_productos(os.path.join(base, "productos.dbf"), enc)
+    fc = settings.facturacion()
+    fact = store.facturadas_set()
+    comps = []
+    for v in facturacion.leer_ventas_dia(base, dia, enc):
+        comp = facturacion.construir_comprobante(v, prods, fc)
+        comp["ya_facturado"] = comp["numcheque_pos"] in fact
+        comps.append(comp)
+    comps.sort(key=lambda x: x["numcheque_pos"])
+    return {"fecha": dia.isoformat(), "total": len(comps), "comprobantes": comps}
+
+
+def _pendientes_dia(fecha: str) -> dict:
+    data = _comprobantes_dia(fecha)
+    pend = [c for c in data["comprobantes"] if not c["ya_facturado"]]
+    return {"fecha": data["fecha"], "total": len(pend),
+            "pendientes": [{"numcheque_pos": c["numcheque_pos"], "serie": c["serie"],
+                            "tipo_comprobante": c["tipo_comprobante"],
+                            "importe_total": c["totales"]["importe_total"],
+                            "origen": c["origen"]} for c in pend]}
+
+
+# ---------- Llamables por el facturador (token Bearer, igual que el bot) ----------
+@app.get("/facturacion/folio/{numcheque}")
+def fact_folio(numcheque: int, _: None = Depends(require_lookup)) -> dict:
+    return _build_comprobante(numcheque)
+
+
+@app.get("/facturacion/ventas")
+def fact_ventas(fecha: str = "hoy", _: None = Depends(require_lookup)) -> dict:
+    return _comprobantes_dia(fecha)
+
+
+@app.get("/facturacion/pendientes")
+def fact_pendientes(fecha: str = "hoy", _: None = Depends(require_lookup)) -> dict:
+    return _pendientes_dia(fecha)
+
+
+@app.post("/facturacion/marcar")
+def fact_marcar(payload: dict, _: None = Depends(require_lookup)) -> dict:
+    """El facturador reporta una venta como ya emitida (anti-duplicidad)."""
+    num = payload.get("numcheque")
+    if num is None:
+        raise HTTPException(status_code=400, detail="falta 'numcheque'")
+    return store.marcar_facturada(num, payload.get("tipo", ""), payload.get("serie", ""),
+                                  payload.get("correlativo", ""), payload.get("cdr", ""))
+
+
+# ---------- Para la prueba del panel (protegido por login de admin) ----------
+@app.get("/api/facturacion/folio/{numcheque}")
+def api_fact_folio(numcheque: int, _: None = Depends(require_admin)) -> dict:
+    return _build_comprobante(numcheque)
+
+
+@app.get("/api/facturacion/ventas")
+def api_fact_ventas(fecha: str = "hoy", _: None = Depends(require_admin)) -> dict:
+    return _comprobantes_dia(fecha)
 
 
 @app.post("/api/token/generar")

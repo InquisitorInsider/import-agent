@@ -45,6 +45,14 @@ CREATE TABLE IF NOT EXISTS meta (
     clave TEXT PRIMARY KEY,
     valor TEXT
 );
+CREATE TABLE IF NOT EXISTS facturadas (
+    numcheque   INTEGER PRIMARY KEY,
+    tipo        TEXT,
+    serie       TEXT,
+    correlativo TEXT,
+    cdr         TEXT,
+    fecha       TEXT
+);
 """
 
 
@@ -149,6 +157,42 @@ def all_clientes() -> dict[str, dict]:
             if d["celular"] in clientes:
                 clientes[d["celular"]]["direcciones"].append(dict(d))
     return clientes
+
+
+# ----------------------------- facturación (anti-duplicidad) -----------------------------
+def marcar_facturada(numcheque, tipo: str = "", serie: str = "",
+                     correlativo="", cdr: str = "") -> dict:
+    """Registra un NUMCHEQUE como ya facturado electrónicamente (lo reporta el
+    facturador tras emitir). Evita emitir dos veces la misma venta."""
+    ahora = datetime.now().isoformat(timespec="seconds")
+    with _lock, _conn() as c:
+        c.executescript(_SCHEMA)
+        c.execute(
+            "INSERT OR REPLACE INTO facturadas (numcheque, tipo, serie, correlativo, cdr, fecha) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (int(numcheque), tipo, serie, str(correlativo or ""), cdr, ahora),
+        )
+    return {"numcheque": int(numcheque), "serie": serie, "correlativo": correlativo, "fecha": ahora}
+
+
+def esta_facturada(numcheque) -> bool:
+    with _lock, _conn() as c:
+        c.executescript(_SCHEMA)
+        r = c.execute("SELECT 1 FROM facturadas WHERE numcheque=?", (int(numcheque),)).fetchone()
+    return r is not None
+
+
+def facturadas_set() -> set:
+    with _lock, _conn() as c:
+        c.executescript(_SCHEMA)
+        return {r[0] for r in c.execute("SELECT numcheque FROM facturadas")}
+
+
+def info_facturada(numcheque) -> dict | None:
+    with _lock, _conn() as c:
+        c.executescript(_SCHEMA)
+        r = c.execute("SELECT * FROM facturadas WHERE numcheque=?", (int(numcheque),)).fetchone()
+    return dict(r) if r else None
 
 
 def stats() -> dict:

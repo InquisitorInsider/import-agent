@@ -160,6 +160,41 @@ def leer_venta(base_dir: str, numcheque, encoding: str) -> dict | None:
     return None
 
 
+def leer_ventas_dia(base_dir: str, dia: date, encoding: str) -> list:
+    """Lee TODAS las ventas (vigente + cerrado) de un día en UNA pasada por tabla.
+
+    Devuelve [{origen, cabecera, detalle(precio>0), pagos}] sin anuladas.
+    """
+    ventas = []
+    for origen, f_cab, f_det, f_pag in _FUENTES:
+        p = os.path.join(base_dir, f_cab)
+        if not os.path.exists(p):
+            continue
+        cabs = {}
+        for r in _abrir(p, encoding):
+            fec = r.get("FECHA")
+            fd = fec.date() if isinstance(fec, datetime) else fec
+            # solo ventas con folio de cuenta real (NUMCHEQUE>0), no anuladas.
+            # NUMCHEQUE==0 => mesa abierta sin cuenta asignada (no facturable).
+            if fd == dia and not r.get("CANCELADO") and int(_f(r.get("NUMCHEQUE"))) > 0:
+                cabs[r.get("FOLIO")] = dict(r)
+        if not cabs:
+            continue
+        det_by, pag_by = {}, {}
+        for r in _abrir(os.path.join(base_dir, f_det), encoding):
+            fo = r.get("FOLIODET")
+            if fo in cabs and _f(r.get("PRECIO")) > 0:
+                det_by.setdefault(fo, []).append(dict(r))
+        for r in _abrir(os.path.join(base_dir, f_pag), encoding):
+            fo = r.get("FOLIO")
+            if fo in cabs:
+                pag_by.setdefault(fo, []).append(dict(r))
+        for fo, cab in cabs.items():
+            ventas.append({"origen": origen, "cabecera": cab,
+                           "detalle": det_by.get(fo, []), "pagos": pag_by.get(fo, [])})
+    return ventas
+
+
 def ventas_del_dia(base_dir: str, dia: date, encoding: str) -> list:
     """NUMCHEQUE de todas las ventas (vigente + cerrado) de un día dado, no anuladas."""
     nums = []
@@ -272,6 +307,10 @@ _TABLAS = ["cheques.dbf", "cheqdet.dbf", "chequespagos.dbf",
            "productos.dbf"]
 
 
+_MAIN = ["cheques.dbf", "cheqdet.dbf", "chequespagos.dbf", "productos.dbf"]
+_TEMP = ["tempcheques.dbf", "tempcheqdet.dbf", "tempchequespagos.dbf"]
+
+
 def resolver_dir(src: dict, workdir: str) -> str:
     """Devuelve un directorio con los DBF de ventas. Local: la carpeta montada;
     SMB: descarga las tablas a `workdir`."""
@@ -285,3 +324,28 @@ def resolver_dir(src: dict, workdir: str) -> str:
         except dbflib.DbfError:
             pass  # alguna temp puede no existir en cierto momento
     return workdir
+
+
+def resolver_cache(src: dict, cache_dir: str, max_age_main: int = 600) -> str:
+    """Como resolver_dir pero con caché: las tablas principales (cheques*, productos)
+    se vuelven a bajar solo si faltan o están más viejas que `max_age_main` seg
+    (cambian al cerrar turno); las `temp*` (turno vigente) SIEMPRE se refrescan."""
+    import time
+    stype = (src.get("source_type") or "smb").lower()
+    if stype == "local":
+        return src.get("local_dir") or ""
+    os.makedirs(cache_dir, exist_ok=True)
+    now = time.time()
+    for t in _MAIN:
+        p = os.path.join(cache_dir, t)
+        if (not os.path.exists(p)) or (now - os.path.getmtime(p) > max_age_main):
+            try:
+                dbflib._smb_fetch(src, t, cache_dir)
+            except dbflib.DbfError:
+                pass
+    for t in _TEMP:
+        try:
+            dbflib._smb_fetch(src, t, cache_dir)
+        except dbflib.DbfError:
+            pass
+    return cache_dir
