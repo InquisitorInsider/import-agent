@@ -100,14 +100,14 @@ No necesitas subir `app/` ni `Dockerfile` al servidor: solo el compose.
    - Pega el compose editado. **Save**.
 3. Selecciona `import-agent` y pulsa **Up** (▲). OMV **descarga** la imagen de
    GHCR y la levanta (sin compilar).
-4. Comprueba: `http://IP_DEL_OMV:8091/health` y abre el panel en
-   `http://IP_DEL_OMV:8091`.
+4. Comprueba: `http://IP_DEL_OMV:8094/health` y abre el panel en
+   `http://IP_DEL_OMV:8094`.
 5. En el panel: pestaña **Importaciones → Guardar origen → Importación masiva**.
 
 ### Detalles de este compose (ya vienen resueltos)
 
-- **Puerto `8091:8000`**: el 8000 ya está ocupado en tu OMV (igual que con
-  print-agent). Acceso por `http://IP_OMV:8091`.
+- **Puerto `8094:8000`**: el 8000 ya está ocupado en tu OMV (igual que con
+  print-agent). Acceso por `http://IP_OMV:8094`.
 - **Red `pos-net`** (la misma de print-agent/bot): el bot podrá llamarlo por
   `http://import-agent:8000`.
 - **Monta el volumen `whatsapp-bot_db-data` en `/bot`** con `BOT_DB_PATH=/bot/pedidos.db`,
