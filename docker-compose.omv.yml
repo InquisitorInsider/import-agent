@@ -17,6 +17,7 @@ services:
     ports:
       - "8095:8000"
     environment:
+      TZ: "America/Lima"
       ADMIN_USER: "admin"
       ADMIN_PASSWORD: "CAMBIA-ESTA-CLAVE"        # <<< clave del panel
       LOOKUP_TOKEN: ""                           # <<< token opcional para el bot

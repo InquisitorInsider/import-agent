@@ -33,7 +33,7 @@ from __future__ import annotations
 
 import os
 import secrets
-from datetime import date, datetime
+from datetime import date, datetime, timedelta, timezone
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query
 from fastapi.responses import HTMLResponse
@@ -155,10 +155,16 @@ def _build_comprobante(numcheque: int) -> dict:
     return comp
 
 
+def _hoy_lima() -> date:
+    """Fecha de hoy en Perú (UTC-5, sin horario de verano), sin depender del TZ
+    del contenedor."""
+    return (datetime.now(timezone.utc) - timedelta(hours=5)).date()
+
+
 def _parse_fecha(fecha: str) -> date:
     f = (fecha or "hoy").strip().lower()
     if f in ("hoy", "today", ""):
-        return datetime.now().date()
+        return _hoy_lima()
     try:
         return datetime.strptime(f, "%Y-%m-%d").date()
     except ValueError:
