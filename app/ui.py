@@ -340,7 +340,7 @@ PAGE = r"""<!doctype html>
       <div class="row">
         <input id="fc-folio" placeholder="N° de folio, ej. 65271" style="max-width:240px">
         <button onclick="probarFolio()">Ver comprobante</button>
-        <input id="fc-fecha" placeholder="hoy o 2026-06-15" style="max-width:200px">
+        <input type="date" id="fc-fecha" style="max-width:200px">
         <button class="sec" onclick="probarFecha()">Ver ventas del día</button>
       </div>
       <div id="fc-prueba-info" class="muted" style="margin-top:10px"></div>
@@ -400,6 +400,7 @@ async function loadFactura(){
   set('fc_forma_pago_sunat',c.forma_pago_sunat);set('fc_umbral_dni_boleta',c.umbral_dni_boleta);
   renderReglas(FC.igv_reglas||[]);renderPagos(FC.formas_pago||[]);
   $('fc-contrato').textContent=FC_CONTRATO;
+  if($('fc-fecha')&&!$('fc-fecha').value)$('fc-fecha').value=hoyLocal();
 }
 function esc2(s){return String(s==null?'':s).replace(/"/g,'&quot;');}
 function reglaRow(r){r=r||{};const tot=((+r.igv||0)+(+r.ipm||0)).toFixed(1);return '<tr>'
@@ -455,14 +456,13 @@ async function probarFolio(){
     $('fc-prueba').textContent=JSON.stringify(c,null,2);
   }catch(e){$('fc-prueba-info').innerHTML='<span class="chip bad">'+e.message+'</span>';$('fc-prueba').textContent='';}
 }
+function hoyLocal(){const d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');}
 async function probarFecha(){
   const f=$('fc-fecha').value.trim()||'hoy';
   $('fc-prueba-info').textContent='consultando…';$('fc-prueba').textContent='';
   try{const r=await api('/api/facturacion/ventas?fecha='+encodeURIComponent(f));
-    $('fc-prueba-info').innerHTML='<b>'+r.total+'</b> venta(s) el '+r.fecha;
-    $('fc-prueba').textContent=JSON.stringify(r.comprobantes.map(c=>({folio:c.numcheque_pos,
-      tipo:c.tipo_comprobante,serie:c.serie,total:c.totales.importe_total,
-      origen:c.origen,ya_facturado:c.ya_facturado})),null,2);
+    $('fc-prueba-info').innerHTML='<b>'+r.total+'</b> venta(s) el '+r.fecha+' — comprobantes completos:';
+    $('fc-prueba').textContent=JSON.stringify(r.comprobantes,null,2);
   }catch(e){$('fc-prueba-info').innerHTML='<span class="chip bad">'+e.message+'</span>';$('fc-prueba').textContent='';}
 }
 
