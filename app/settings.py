@@ -9,15 +9,26 @@ Estructura:
               smb_user, smb_pass, smb_domain, smb_ip,
               clientes_file, direcciones_file },
   "bot_db_path": "/bot/pedidos.db",
-  "lookup_token": "",
-  "dbf_encoding": "cp1252"
+  "lookup_token": "",           # campo heredado, se migra a api_tokens al cargar
+  "dbf_encoding": "cp1252",
+  "api_tokens": [               # tokens para clientes HTTP (bot, facturador, etc.)
+    { "id": "…", "name": "Bot WhatsApp", "token": "…",
+      "permisos": ["clientes", "facturacion"], "activo": true, "creado": "…" }
+  ],
+  "admin_users": [              # usuarios del panel web
+    { "username": "admin", "password_hash": "salt:hash",
+      "permisos": ["*"], "activo": true, "creado": "…" }
+  ]
 }
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import os
+import secrets
 import threading
+from datetime import datetime, timezone
 
 from . import config
 
@@ -29,6 +40,32 @@ _SOURCE_KEYS = ["source_type", "local_dir", "smb_host", "smb_share", "smb_path",
                 "smb_user", "smb_pass", "smb_domain", "smb_ip",
                 "clientes_file", "direcciones_file"]
 
+TOKEN_PERMS = ("clientes", "facturacion")
+USER_PERMS  = ("config", "importar", "buscar", "sync", "factura", "tokens", "usuarios", "*")
+
+
+# ── Utilidades de contraseña (pbkdf2-sha256, stdlib) ──────────────────────────
+
+def _now() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _hash_pw(pw: str) -> str:
+    salt = secrets.token_hex(16)
+    h = hashlib.pbkdf2_hmac("sha256", pw.encode(), salt.encode(), 100_000).hex()
+    return f"{salt}:{h}"
+
+
+def _check_pw(pw: str, stored: str) -> bool:
+    try:
+        salt, h = stored.split(":", 1)
+        return secrets.compare_digest(
+            hashlib.pbkdf2_hmac("sha256", pw.encode(), salt.encode(), 100_000).hex(), h)
+    except Exception:
+        return False
+
+
+# ── Coerciones de estructura ───────────────────────────────────────────────────
 
 def _coerce_source(s: dict) -> dict:
     out = {k: str(s.get(k, "")).strip() for k in _SOURCE_KEYS}
@@ -47,8 +84,6 @@ def _num(v, default=0.0) -> float:
 
 
 def _seed_facturacion() -> dict:
-    """Config de facturación electrónica. TODO editable desde el panel: si SUNAT
-    cambia tasas, series o códigos de catálogo, se ajusta sin tocar el código."""
     return {
         "emisor": {
             "ruc": "", "razon_social": "", "nombre_comercial": "",
@@ -57,7 +92,6 @@ def _seed_facturacion() -> dict:
         },
         "series": {"boleta": "B001", "factura": "F001"},
         "moneda": "PEN",
-        # IGV total = igv + ipm. Cálculo inverso: base = TOTAL/(1+(igv+ipm)/100).
         "igv_reglas": [
             {"desde": "2022-09-01", "hasta": "2025-12-31", "igv": 8.0, "ipm": 2.0},
             {"desde": "2026-01-01", "hasta": "2026-12-31", "igv": 8.0, "ipm": 2.5},
@@ -113,8 +147,12 @@ def _seed() -> dict:
         "lookup_token": config.LOOKUP_TOKEN,
         "dbf_encoding": config.DBF_ENCODING,
         "facturacion": _seed_facturacion(),
+        "api_tokens": [],
+        "admin_users": [],
     }
 
+
+# ── Carga y persistencia ───────────────────────────────────────────────────────
 
 def load() -> None:
     global _data
@@ -130,8 +168,23 @@ def load() -> None:
             d["dbf_encoding"] = str(stored.get("dbf_encoding", d["dbf_encoding"])).strip() or "cp1252"
             if "facturacion" in stored:
                 d["facturacion"] = _coerce_facturacion(stored["facturacion"])
+            d["api_tokens"]   = stored.get("api_tokens", [])
+            d["admin_users"]  = stored.get("admin_users", [])
         except (OSError, json.JSONDecodeError):
             pass
+
+    # Migrar token heredado (campo único) → lista de api_tokens
+    if d["lookup_token"] and not d["api_tokens"]:
+        d["api_tokens"] = [{
+            "id": "leg-" + secrets.token_hex(4),
+            "name": "Token heredado (migrado)",
+            "token": d["lookup_token"],
+            "permisos": ["clientes", "facturacion"],
+            "activo": True,
+            "creado": _now(),
+        }]
+        d["lookup_token"] = ""
+
     _data = d
     _persist()
 
@@ -144,7 +197,8 @@ def _persist() -> None:
     os.replace(tmp, _PATH)
 
 
-# ----------------------------- getters -----------------------------
+# ── Getters ────────────────────────────────────────────────────────────────────
+
 def source() -> dict:
     return dict(_data.get("source", {}))
 
@@ -165,12 +219,159 @@ def facturacion() -> dict:
     return _coerce_facturacion(_data.get("facturacion", {}))
 
 
-# ----------------------------- setters (desde la UI) -----------------------------
+def api_tokens() -> list:
+    return list(_data.get("api_tokens", []))
+
+
+def admin_users() -> list:
+    """Lista de usuarios (sin password_hash)."""
+    return [{k: v for k, v in u.items() if k != "password_hash"}
+            for u in _data.get("admin_users", [])]
+
+
+# ── Auth ───────────────────────────────────────────────────────────────────────
+
+def has_any_api_token() -> bool:
+    """True si hay al menos un token activo configurado."""
+    return any(t.get("activo") for t in _data.get("api_tokens", []))
+
+
+def verify_api_token(token: str, perm: str) -> bool:
+    """Devuelve True si el token dado existe, está activo y tiene el permiso."""
+    for t in _data.get("api_tokens", []):
+        if not t.get("activo"):
+            continue
+        stored = t.get("token", "")
+        if len(token) == len(stored) and secrets.compare_digest(token, stored):
+            p = t.get("permisos", [])
+            return "*" in p or perm in p
+    return False
+
+
+def verify_admin(username: str, password: str) -> dict | None:
+    """Autentica un usuario del panel.
+
+    Siempre comprueba primero las variables de entorno ADMIN_USER/ADMIN_PASSWORD
+    (sirven como clave maestra aunque haya usuarios guardados).
+    """
+    if (config.ADMIN_PASSWORD
+            and secrets.compare_digest(username, config.ADMIN_USER)
+            and secrets.compare_digest(password, config.ADMIN_PASSWORD)):
+        return {"username": username, "permisos": ["*"], "activo": True}
+    for u in _data.get("admin_users", []):
+        if u.get("activo") and u["username"] == username:
+            if _check_pw(password, u.get("password_hash", "")):
+                return {k: v for k, v in u.items() if k != "password_hash"}
+    return None
+
+
+# ── Mutaciones: tokens API ─────────────────────────────────────────────────────
+
+def create_api_token(name: str, permisos: list) -> dict:
+    permisos = [p for p in permisos if p in TOKEN_PERMS]
+    t = {
+        "id": secrets.token_hex(8),
+        "name": name.strip(),
+        "token": secrets.token_urlsafe(32),
+        "permisos": permisos,
+        "activo": True,
+        "creado": _now(),
+    }
+    with _lock:
+        _data.setdefault("api_tokens", []).append(t)
+        _persist()
+    return t
+
+
+def regenerar_api_token(tid: str) -> dict | None:
+    with _lock:
+        for i, t in enumerate(_data.get("api_tokens", [])):
+            if t["id"] == tid:
+                _data["api_tokens"][i] = {**t, "token": secrets.token_urlsafe(32)}
+                _persist()
+                return _data["api_tokens"][i]
+    return None
+
+
+def update_api_token(tid: str, patch: dict) -> dict | None:
+    with _lock:
+        for i, t in enumerate(_data.get("api_tokens", [])):
+            if t["id"] == tid:
+                updated = dict(t)
+                if "name" in patch:
+                    updated["name"] = str(patch["name"]).strip()
+                if "activo" in patch:
+                    updated["activo"] = bool(patch["activo"])
+                if "permisos" in patch:
+                    updated["permisos"] = [p for p in patch["permisos"] if p in TOKEN_PERMS]
+                _data["api_tokens"][i] = updated
+                _persist()
+                return updated
+    return None
+
+
+def delete_api_token(tid: str) -> bool:
+    with _lock:
+        prev = _data.get("api_tokens", [])
+        new = [t for t in prev if t["id"] != tid]
+        if len(new) == len(prev):
+            return False
+        _data["api_tokens"] = new
+        _persist()
+        return True
+
+
+# ── Mutaciones: usuarios admin ─────────────────────────────────────────────────
+
+def create_admin_user(username: str, password: str, permisos: list) -> dict:
+    permisos = [p for p in permisos if p in USER_PERMS]
+    u = {
+        "username": username.strip(),
+        "password_hash": _hash_pw(password),
+        "permisos": permisos,
+        "activo": True,
+        "creado": _now(),
+    }
+    with _lock:
+        _data.setdefault("admin_users", []).append(u)
+        _persist()
+    return {k: v for k, v in u.items() if k != "password_hash"}
+
+
+def update_admin_user(username: str, patch: dict) -> dict | None:
+    with _lock:
+        for i, u in enumerate(_data.get("admin_users", [])):
+            if u["username"] == username:
+                updated = dict(u)
+                if patch.get("password"):
+                    updated["password_hash"] = _hash_pw(patch["password"])
+                if "permisos" in patch:
+                    updated["permisos"] = [p for p in patch["permisos"] if p in USER_PERMS]
+                if "activo" in patch:
+                    updated["activo"] = bool(patch["activo"])
+                _data["admin_users"][i] = updated
+                _persist()
+                return {k: v for k, v in updated.items() if k != "password_hash"}
+    return None
+
+
+def delete_admin_user(username: str) -> bool:
+    with _lock:
+        prev = _data.get("admin_users", [])
+        new = [u for u in prev if u["username"] != username]
+        if len(new) == len(prev):
+            return False
+        _data["admin_users"] = new
+        _persist()
+        return True
+
+
+# ── Setters heredados (desde la UI de Configuración) ──────────────────────────
+
 def save_source(s: dict) -> None:
     s = _coerce_source(s)
     with _lock:
         prev = _data.get("source", {})
-        # secreto vacío => conservar el guardado
         if not s.get("smb_pass"):
             s["smb_pass"] = prev.get("smb_pass", "")
         _data["source"] = s
@@ -194,7 +395,8 @@ def save_globals(payload: dict) -> None:
         _persist()
 
 
-# ----------------------------- vista pública (oculta secretos) -----------------------------
+# ── Vista pública (oculta secretos) ───────────────────────────────────────────
+
 def public() -> dict:
     s = dict(_data.get("source", {}))
     s["smb_pass"] = "***" if s.get("smb_pass") else ""
