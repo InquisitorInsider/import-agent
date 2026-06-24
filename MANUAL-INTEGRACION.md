@@ -17,7 +17,8 @@ electrónica, paneles web, etc.
 7. [Estructuras de datos](#7-estructuras-de-datos)
 8. [Referencia de variables de entorno](#8-referencia-de-variables-de-entorno)
 9. [Gestión de tokens desde el panel](#9-gestión-de-tokens-desde-el-panel)
-10. [Errores comunes](#10-errores-comunes)
+10. [Prueba de conexiones](#10-prueba-de-conexiones)
+11. [Errores comunes](#11-errores-comunes)
 
 ---
 
@@ -610,7 +611,87 @@ Para rotar un token sin interrumpir el servicio:
 
 ---
 
-## 10. Errores comunes
+## 10. Prueba de conexiones
+
+El panel expone dos endpoints para diagnosticar la conectividad **sin necesidad
+de hacer una importación completa**. Ambos requieren autenticación de panel con
+permiso `config`.
+
+---
+
+### `POST /api/source/probar`
+
+Verifica la conexión al **origen de los DBF** (SMB o carpeta local) y confirma
+que los dos archivos `.dbf` existen y son accesibles.
+
+```bash
+curl -X POST "http://import-agent:8000/api/source/probar" \
+  -u admin:TU_CLAVE
+```
+
+**Respuesta exitosa (200):**
+
+```json
+{
+  "ok": true,
+  "tipo": "smb",
+  "archivos": [
+    { "nombre": "clientesdomicilio.dbf", "existe": true, "tamano_kb": 1240 },
+    { "nombre": "direccionesdomicilio.dbf", "existe": true, "tamano_kb": 430 }
+  ]
+}
+```
+
+**Respuesta de error (400):**
+
+```json
+{ "detail": "Credenciales rechazadas (revisa usuario, clave y dominio)." }
+```
+
+---
+
+### `POST /api/botdb/probar`
+
+Verifica la conexión al **SQLite del bot** (la BD configurada en `bot_db_path`).
+Comprueba que el archivo existe, se puede abrir y contiene la tabla `clientes`.
+
+```bash
+curl -X POST "http://import-agent:8000/api/botdb/probar" \
+  -u admin:TU_CLAVE
+```
+
+**Respuesta exitosa (200):**
+
+```json
+{
+  "ok": true,
+  "mensaje": "Conexión Exitosa",
+  "tablas": ["clientes", "direcciones", "pedidos"],
+  "clientes": 1523,
+  "direcciones": 2870
+}
+```
+
+**Posibles respuestas de error (400):**
+
+| Mensaje | Causa |
+|---|---|
+| `No hay ruta configurada para la BD del bot (bot_db_path).` | El campo `Ruta BD del bot` está vacío en Configuración. |
+| `El archivo no existe en la ruta configurada: /bot/pedidos.db` | El volumen del bot no está montado o la ruta es incorrecta. |
+| `El archivo existe pero no contiene la tabla 'clientes'.` | El archivo apunta a una BD diferente (no es la del bot). |
+| `Error al abrir la base de datos: …` | El archivo existe pero está corrupto o bloqueado. |
+
+**Casos de uso típicos:**
+
+1. Después de configurar `BOT_DB_PATH` por primera vez: usa este endpoint para
+   confirmar que el volumen está correctamente montado antes de hacer una
+   sincronización.
+2. Si el panel de sincronización devuelve error, llama primero a este endpoint
+   para distinguir entre "BD inaccesible" y "índice vacío".
+
+---
+
+## 11. Errores comunes
 
 | Error | Causa | Solución |
 |---|---|---|
@@ -618,7 +699,8 @@ Para rotar un token sin interrumpir el servicio:
 | `400 celular inválido` | El número enviado no tiene el número de dígitos configurado. | Verificar `PHONE_DIGITS` y el formato del celular. |
 | `404 cliente no encontrado` | El celular existe en el POS pero no se ha importado aún. | Hacer una importación desde el panel → **Importar**. |
 | `404 venta (folio) no encontrada` | El `numcheque` no existe en ninguna tabla del POS. | Verificar el número de folio directamente en el POS. |
-| `400` al consultar `/facturacion/*` | Los DBF no son accesibles (SMB caído, ruta incorrecta). | Verificar con **Probar conexión** en el panel → Configuración. |
+| `400` al consultar `/facturacion/*` | Los DBF no son accesibles (SMB caído, ruta incorrecta). | Usar `POST /api/source/probar` para diagnosticar. |
+| `400 No hay BD del bot accesible` en `/api/sync/*` | `bot_db_path` vacío o archivo inexistente. | Usar `POST /api/botdb/probar` para ver el error exacto. |
 | Panel web pide contraseña en loop | Credenciales incorrectas. | Revisar `ADMIN_USER` / `ADMIN_PASSWORD` en el entorno, o usar un usuario creado desde el panel. |
 
 ---

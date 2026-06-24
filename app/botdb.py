@@ -31,6 +31,43 @@ def disponible(path: str | None) -> bool:
     return bool(path) and os.path.exists(path)
 
 
+def probar_conexion(path: str | None) -> dict:
+    """Prueba la conexión al SQLite del bot.
+
+    Devuelve {"ok": True, "mensaje": "Conexión Exitosa", "tablas": [...], "clientes": N, "direcciones": N}.
+    Lanza RuntimeError con el motivo del fallo si no logra conectarse.
+    """
+    if not path:
+        raise RuntimeError("No hay ruta configurada para la BD del bot (bot_db_path).")
+    if not os.path.exists(path):
+        raise RuntimeError(f"El archivo no existe en la ruta configurada: {path}")
+    try:
+        with _conn(path) as c:
+            tablas = [r[0] for r in c.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name"
+            ).fetchall()]
+            if "clientes" not in tablas:
+                raise RuntimeError(
+                    f"El archivo existe pero no contiene la tabla 'clientes'. "
+                    f"Tablas encontradas: {', '.join(tablas) or '(ninguna)'}."
+                )
+            n_clientes = c.execute("SELECT COUNT(*) FROM clientes").fetchone()[0]
+            n_dirs = 0
+            if "direcciones" in tablas:
+                n_dirs = c.execute("SELECT COUNT(*) FROM direcciones").fetchone()[0]
+        return {
+            "ok": True,
+            "mensaje": "Conexión Exitosa",
+            "tablas": tablas,
+            "clientes": n_clientes,
+            "direcciones": n_dirs,
+        }
+    except RuntimeError:
+        raise
+    except Exception as e:
+        raise RuntimeError(f"Error al abrir la base de datos: {e}") from e
+
+
 def _conn(path: str) -> sqlite3.Connection:
     c = sqlite3.connect(path)
     c.row_factory = sqlite3.Row

@@ -62,6 +62,8 @@ las direcciones huérfanas).
 | POST | `/api/importar` | Importación masiva. |
 | GET | `/api/clientes?q=&limit=&offset=` | Listar/buscar en el índice. |
 | POST | `/api/source` · `/api/globals` | Guardar origen DBF / conexión bot. |
+| POST | `/api/source/probar` | Prueba conexión al origen DBF; devuelve `"ok": true` o el error. |
+| POST | `/api/botdb/probar` | Prueba conexión al SQLite del bot; devuelve `"Conexión Exitosa"` o el error. |
 | GET | `/api/sync/diff` | Diferencias índice (DBF) vs bot. |
 | POST | `/api/sync/aplicar` | Aplicar correcciones al bot. |
 

@@ -19,7 +19,8 @@ Panel de importación (protegido con ADMIN_PASSWORD o usuarios guardados):
   GET  /api/me                 -> usuario actual + permisos
   GET  /api/settings           -> configuración + estado del índice
   POST /api/source             -> guardar origen DBF  [config]
-  POST /api/source/probar      -> probar conexión     [config]
+  POST /api/source/probar      -> probar conexión DBF  [config]
+  POST /api/botdb/probar       -> probar BD del bot    [config]
   POST /api/globals            -> guardar globals      [config]
   GET  /api/facturacion        -> config facturación   [factura]
   POST /api/facturacion        -> guardar facturación  [factura]
@@ -255,6 +256,16 @@ def api_source_probar(_: dict = Depends(require_admin("config"))) -> dict:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:  # noqa: BLE001
         raise HTTPException(status_code=500, detail=f"Error probando la conexión: {e}")
+
+
+@app.post("/api/botdb/probar")
+def api_botdb_probar(_: dict = Depends(require_admin("config"))) -> dict:
+    try:
+        return botdb.probar_conexion(settings.bot_db_path())
+    except RuntimeError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=500, detail=f"Error probando la BD del bot: {e}")
 
 
 # ══════════════════════════════════════════════════════════════════════════════
