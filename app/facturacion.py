@@ -120,6 +120,23 @@ def cargar_grupos(path: str, encoding: str) -> dict:
     return idx
 
 
+def inspeccionar_dbf(path: str, encoding: str, limite: int = 3) -> dict:
+    """Diagnóstico de solo lectura: nombres de campo reales y unas filas de
+    muestra. Para confirmar la estructura exacta de un .dbf en producción sin
+    adivinar (ver GRUPO en productos.dbf vs CLAVE/DESCRIPCION en grupos.dbf)."""
+    if not os.path.exists(path):
+        return {"existe": False, "ruta": path}
+    tabla = _abrir(path, encoding)
+    muestras = []
+    for i, r in enumerate(tabla):
+        if i >= limite:
+            break
+        muestras.append({str(k): (str(v) if v is not None else None)
+                         for k, v in dict(r).items()})
+    return {"existe": True, "ruta": path, "campos": list(tabla.field_names),
+           "total_muestras": len(muestras), "muestras": muestras}
+
+
 def cargar_productos(path: str, encoding: str, grupos: dict | None = None) -> dict:
     idx = {}
     if not os.path.exists(path):

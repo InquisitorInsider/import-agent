@@ -226,6 +226,19 @@ def fact_productos(_: None = Depends(require_lookup("facturacion"))) -> dict:
     return {"total": len(items), "productos": items}
 
 
+@app.get("/facturacion/_debug/dbf")
+def fact_debug_dbf(archivo: str = Query(..., description="productos.dbf o grupos.dbf"),
+                   _: None = Depends(require_lookup("facturacion"))) -> dict:
+    """Diagnóstico temporal de solo lectura: nombres de campo reales y filas de
+    muestra de un .dbf, para confirmar la estructura sin adivinar. No modifica
+    nada. Quitar una vez confirmado el mapeo de GRUPO en producción."""
+    if archivo not in {"productos.dbf", "grupos.dbf"}:
+        raise HTTPException(status_code=400, detail="archivo debe ser productos.dbf o grupos.dbf")
+    enc = settings.dbf_encoding()
+    base = _fact_base()
+    return facturacion.inspeccionar_dbf(os.path.join(base, archivo), enc)
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 #  Panel — general
 # ══════════════════════════════════════════════════════════════════════════════
