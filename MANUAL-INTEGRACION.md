@@ -384,8 +384,9 @@ El campo `ya_facturado: true` aparecerá en las respuestas de `/folio/{n}` y
 
 ### `GET /facturacion/productos`
 
-Catálogo completo de productos (`productos.dbf`): código, descripción y si
-está activo para facturar. Pensado para que otros servicios (ej.
+Catálogo completo de productos (`productos.dbf`): código, descripción, grupo
+(categoría, resuelto desde `grupos.dbf` vía `productos.GRUPO -> grupos.clave`)
+y si está activo para facturar. Pensado para que otros servicios (ej.
 `horno-ruta80`) importen y sincronicen su propio catálogo/equivalencias sin
 tener que tipear códigos a mano.
 
@@ -400,11 +401,14 @@ curl "http://import-agent:8000/facturacion/productos" \
 {
   "total": 2,
   "productos": [
-    { "codigo": "PROD001", "descripcion": "1 POLLO ENTERO A LA BRASA", "activo": true },
-    { "codigo": "PROD002", "descripcion": "1/4 DE POLLO A LA BRASA", "activo": true }
+    { "codigo": "PROD001", "descripcion": "1 POLLO ENTERO A LA BRASA", "grupo": "POLLOS A LA BRASA", "activo": true },
+    { "codigo": "PROD002", "descripcion": "1/4 DE POLLO A LA BRASA", "grupo": "POLLOS A LA BRASA", "activo": true }
   ]
 }
 ```
+
+`grupo` viene en `null` si el producto no tiene grupo asignado en el POS, o
+si `grupos.dbf` no está disponible en el origen configurado.
 
 ---
 

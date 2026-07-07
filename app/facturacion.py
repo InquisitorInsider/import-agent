@@ -100,14 +100,39 @@ def num_a_letras(monto: float, moneda: str = "SOLES") -> str:
 
 
 # ───────────────────────── productos ─────────────────────────
-def cargar_productos(path: str, encoding: str) -> dict:
+def _row_upper(r) -> dict:
+    """Los distintos .dbf del POS no siguen la misma convención de mayúsculas
+    para nombres de campo (productos.dbf usa CLAVE/DESCRIPCIO, grupos.dbf usa
+    clave/descripcion) — normalizamos para no depender de eso."""
+    return {str(k).upper(): v for k, v in dict(r).items()}
+
+
+def cargar_grupos(path: str, encoding: str) -> dict:
+    """clave -> descripcion, desde grupos.dbf (categoría de producto)."""
     idx = {}
     if not os.path.exists(path):
         return idx
     for r in _abrir(path, encoding):
-        idx[_txt(r.get("CLAVE"))] = {
-            "desc": _txt(r.get("DESCRIPCIO")),
-            "nofact": bool(r.get("NOFACTURAB")),
+        row = _row_upper(r)
+        clave = _txt(row.get("CLAVE"))
+        if clave:
+            idx[clave] = _txt(row.get("DESCRIPCION"))
+    return idx
+
+
+def cargar_productos(path: str, encoding: str, grupos: dict | None = None) -> dict:
+    idx = {}
+    if not os.path.exists(path):
+        return idx
+    grupos = grupos or {}
+    for r in _abrir(path, encoding):
+        row = _row_upper(r)
+        grupo_clave = _txt(row.get("GRUPO"))
+        idx[_txt(row.get("CLAVE"))] = {
+            "desc": _txt(row.get("DESCRIPCIO")),
+            "nofact": bool(row.get("NOFACTURAB")),
+            "grupo_codigo": grupo_clave,
+            "grupo_nombre": grupos.get(grupo_clave, ""),
         }
     return idx
 
@@ -304,10 +329,10 @@ def construir_comprobante(venta: dict, productos: dict, fc: dict,
 # ───────────────────────── resolver archivos (SMB o local) ─────────────────────────
 _TABLAS = ["cheques.dbf", "cheqdet.dbf", "chequespagos.dbf",
            "tempcheques.dbf", "tempcheqdet.dbf", "tempchequespagos.dbf",
-           "productos.dbf"]
+           "productos.dbf", "grupos.dbf"]
 
 
-_MAIN = ["cheques.dbf", "cheqdet.dbf", "chequespagos.dbf", "productos.dbf"]
+_MAIN = ["cheques.dbf", "cheqdet.dbf", "chequespagos.dbf", "productos.dbf", "grupos.dbf"]
 _TEMP = ["tempcheques.dbf", "tempcheqdet.dbf", "tempchequespagos.dbf"]
 
 
