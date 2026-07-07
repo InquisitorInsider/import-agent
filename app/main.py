@@ -209,6 +209,21 @@ def fact_marcar(payload: dict, _: None = Depends(require_lookup("facturacion")))
                                   payload.get("correlativo", ""), payload.get("cdr", ""))
 
 
+@app.get("/facturacion/productos")
+def fact_productos(_: None = Depends(require_lookup("facturacion"))) -> dict:
+    """Catálogo de productos.dbf (código, descripción, activo) para que otros
+    servicios (ej. horno-ruta80) sincronicen su propio catálogo/equivalencias."""
+    enc = settings.dbf_encoding()
+    base = _fact_base()
+    prods = facturacion.cargar_productos(os.path.join(base, "productos.dbf"), enc)
+    items = [
+        {"codigo": clave, "descripcion": info.get("desc", ""), "activo": not info.get("nofact")}
+        for clave, info in prods.items()
+    ]
+    items.sort(key=lambda x: x["descripcion"] or x["codigo"])
+    return {"total": len(items), "productos": items}
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 #  Panel — general
 # ══════════════════════════════════════════════════════════════════════════════
