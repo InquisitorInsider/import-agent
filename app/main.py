@@ -55,6 +55,7 @@ from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from . import botdb, config, dbf, facturacion, settings, store, sync, ui
 
 _FACT_CACHE = os.path.join(config.DATA_DIR, "fact_cache")
+_PROD_GRUPO_CACHE = os.path.join(config.DATA_DIR, "productos_cache")
 
 app = FastAPI(title="import-agent", version="1.0.0", docs_url="/docs")
 _basic = HTTPBasic(auto_error=False)
@@ -211,32 +212,15 @@ def fact_marcar(payload: dict, _: None = Depends(require_lookup("facturacion")))
 
 @app.get("/facturacion/productos")
 def fact_productos(_: None = Depends(require_lookup("facturacion"))) -> dict:
-    """Catálogo de productos.dbf (código, descripción, grupo, activo) para que
-    otros servicios (ej. horno-ruta80) sincronicen su propio catálogo/equivalencias."""
+    """Catálogo de productos con grupo (código, descripción, grupo, activo)
+    para que otros servicios (ej. horno-ruta80) sincronicen su propio
+    catálogo/equivalencias. Usa resolución y caché propios — aislado del
+    flujo de facturación electrónica (ver productos_con_grupo())."""
     enc = settings.dbf_encoding()
-    base = _fact_base()
-    grupos = facturacion.cargar_grupos(os.path.join(base, "grupos.dbf"), enc)
-    prods = facturacion.cargar_productos(os.path.join(base, "productos.dbf"), enc, grupos)
-    items = [
-        {"codigo": clave, "descripcion": info.get("desc", ""),
-         "grupo": info.get("grupo_nombre") or None, "activo": not info.get("nofact")}
-        for clave, info in prods.items()
-    ]
+    base = facturacion.resolver_dir_productos(settings.source(), _PROD_GRUPO_CACHE)
+    items = facturacion.productos_con_grupo(base, enc)
     items.sort(key=lambda x: (x["grupo"] is None, x["grupo"] or "", x["descripcion"] or x["codigo"]))
     return {"total": len(items), "productos": items}
-
-
-@app.get("/facturacion/_debug/dbf")
-def fact_debug_dbf(archivo: str = Query(..., description="productos.dbf o grupos.dbf"),
-                   _: None = Depends(require_lookup("facturacion"))) -> dict:
-    """Diagnóstico temporal de solo lectura: nombres de campo reales y filas de
-    muestra de un .dbf, para confirmar la estructura sin adivinar. No modifica
-    nada. Quitar una vez confirmado el mapeo de GRUPO en producción."""
-    if archivo not in {"productos.dbf", "grupos.dbf"}:
-        raise HTTPException(status_code=400, detail="archivo debe ser productos.dbf o grupos.dbf")
-    enc = settings.dbf_encoding()
-    base = _fact_base()
-    return facturacion.inspeccionar_dbf(os.path.join(base, archivo), enc)
 
 
 # ══════════════════════════════════════════════════════════════════════════════

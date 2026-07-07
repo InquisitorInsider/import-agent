@@ -100,58 +100,73 @@ def num_a_letras(monto: float, moneda: str = "SOLES") -> str:
 
 
 # ───────────────────────── productos ─────────────────────────
-def _row_upper(r) -> dict:
-    """Los distintos .dbf del POS no siguen la misma convención de mayúsculas
-    para nombres de campo (productos.dbf usa CLAVE/DESCRIPCIO, grupos.dbf usa
-    clave/descripcion) — normalizamos para no depender de eso."""
+def cargar_productos(path: str, encoding: str) -> dict:
+    idx = {}
+    if not os.path.exists(path):
+        return idx
+    for r in _abrir(path, encoding):
+        idx[_txt(r.get("CLAVE"))] = {
+            "desc": _txt(r.get("DESCRIPCIO")),
+            "nofact": bool(r.get("NOFACTURAB")),
+        }
+    return idx
+
+
+# ───────────────────────── productos + grupo (aislado de facturación) ─────
+# Función independiente para el catálogo con categoría/grupo (consumida por
+# horno-ruta80 vía /facturacion/productos). Deliberadamente NO reutiliza
+# cargar_productos() ni el caché de facturación (_FACT_CACHE/_TABLAS/_MAIN):
+# esos los usan en vivo los endpoints de facturación electrónica y no
+# queremos que un cambio en el catálogo/grupo pueda afectar ese flujo.
+_PROD_GRUPO_TABLAS = ["productos.dbf", "grupos.dbf"]
+
+
+def resolver_dir_productos(src: dict, workdir: str) -> str:
+    """Igual que resolver_dir() pero solo para productos.dbf/grupos.dbf, con
+    su propio directorio de caché (no comparte nada con facturación)."""
+    stype = (src.get("source_type") or "smb").lower()
+    if stype == "local":
+        return src.get("local_dir") or ""
+    os.makedirs(workdir, exist_ok=True)
+    for t in _PROD_GRUPO_TABLAS:
+        try:
+            dbflib._smb_fetch(src, t, workdir)
+        except dbflib.DbfError:
+            pass  # grupos.dbf es opcional: si falta, el producto queda sin grupo
+    return workdir
+
+
+def _upper_keys(r) -> dict:
+    """productos.dbf y grupos.dbf no siguen la misma convención de mayúsculas
+    para nombres de campo — normalizamos para no depender de eso."""
     return {str(k).upper(): v for k, v in dict(r).items()}
 
 
-def cargar_grupos(path: str, encoding: str) -> dict:
-    """clave -> descripcion, desde grupos.dbf (categoría de producto)."""
-    idx = {}
-    if not os.path.exists(path):
-        return idx
-    for r in _abrir(path, encoding):
-        row = _row_upper(r)
-        clave = _txt(row.get("CLAVE"))
-        if clave:
-            idx[clave] = _txt(row.get("DESCRIPCION"))
-    return idx
+def productos_con_grupo(base_dir: str, encoding: str) -> list[dict]:
+    """Catálogo de productos con su grupo resuelto (productos.dbf.GRUPO join
+    grupos.dbf.CLAVE -> DESCRIPCIO). Devuelve una lista lista para exponer."""
+    grupos: dict[str, str] = {}
+    path_grupos = os.path.join(base_dir, "grupos.dbf")
+    if os.path.exists(path_grupos):
+        for r in _abrir(path_grupos, encoding):
+            row = _upper_keys(r)
+            clave = _txt(row.get("CLAVE"))
+            if clave:
+                grupos[clave] = _txt(row.get("DESCRIPCIO"))
 
-
-def inspeccionar_dbf(path: str, encoding: str, limite: int = 3) -> dict:
-    """Diagnóstico de solo lectura: nombres de campo reales y unas filas de
-    muestra. Para confirmar la estructura exacta de un .dbf en producción sin
-    adivinar (ver GRUPO en productos.dbf vs CLAVE/DESCRIPCION en grupos.dbf)."""
-    if not os.path.exists(path):
-        return {"existe": False, "ruta": path}
-    tabla = _abrir(path, encoding)
-    muestras = []
-    for i, r in enumerate(tabla):
-        if i >= limite:
-            break
-        muestras.append({str(k): (str(v) if v is not None else None)
-                         for k, v in dict(r).items()})
-    return {"existe": True, "ruta": path, "campos": list(tabla.field_names),
-           "total_muestras": len(muestras), "muestras": muestras}
-
-
-def cargar_productos(path: str, encoding: str, grupos: dict | None = None) -> dict:
-    idx = {}
-    if not os.path.exists(path):
-        return idx
-    grupos = grupos or {}
-    for r in _abrir(path, encoding):
-        row = _row_upper(r)
-        grupo_clave = _txt(row.get("GRUPO"))
-        idx[_txt(row.get("CLAVE"))] = {
-            "desc": _txt(row.get("DESCRIPCIO")),
-            "nofact": bool(row.get("NOFACTURAB")),
-            "grupo_codigo": grupo_clave,
-            "grupo_nombre": grupos.get(grupo_clave, ""),
-        }
-    return idx
+    items: list[dict] = []
+    path_productos = os.path.join(base_dir, "productos.dbf")
+    if os.path.exists(path_productos):
+        for r in _abrir(path_productos, encoding):
+            row = _upper_keys(r)
+            grupo_clave = _txt(row.get("GRUPO"))
+            items.append({
+                "codigo": _txt(row.get("CLAVE")),
+                "descripcion": _txt(row.get("DESCRIPCIO")),
+                "grupo": grupos.get(grupo_clave) or None,
+                "activo": not bool(row.get("NOFACTURAB")),
+            })
+    return items
 
 
 # ───────────────────────── tasa IGV por fecha ─────────────────────────
@@ -346,10 +361,10 @@ def construir_comprobante(venta: dict, productos: dict, fc: dict,
 # ───────────────────────── resolver archivos (SMB o local) ─────────────────────────
 _TABLAS = ["cheques.dbf", "cheqdet.dbf", "chequespagos.dbf",
            "tempcheques.dbf", "tempcheqdet.dbf", "tempchequespagos.dbf",
-           "productos.dbf", "grupos.dbf"]
+           "productos.dbf"]
 
 
-_MAIN = ["cheques.dbf", "cheqdet.dbf", "chequespagos.dbf", "productos.dbf", "grupos.dbf"]
+_MAIN = ["cheques.dbf", "cheqdet.dbf", "chequespagos.dbf", "productos.dbf"]
 _TEMP = ["tempcheques.dbf", "tempcheqdet.dbf", "tempchequespagos.dbf"]
 
 
