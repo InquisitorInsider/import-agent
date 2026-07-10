@@ -270,22 +270,28 @@ def ventas_del_dia(base_dir: str, dia: date, encoding: str) -> list:
 # ───────────────────────── detalle con modificadores (aislado de facturación) ─────
 # Lee cheqdet/tempcheqdet SIN el filtro PRECIO>0 y agrupa cada línea a S/0.00
 # (modificador, ej. elección de pierna/pecho, sabor, guarnición) bajo la línea
-# de producto (PRECIO>0) más reciente que la precede — el POS no vincula el
-# modificador a su producto con ningún campo explícito, solo con el orden
-# físico en que quedan escritos los registros del ticket (confirmado
-# inspeccionando cheqdet.dbf directamente). Deliberadamente separada de
-# leer_ventas_dia()/construir_comprobante(): esas calculan IGV real para
-# SUNAT y nunca deben ver una línea a S/0.00. Genérica — no exclusiva de
-# ningún módulo consumidor en particular.
+# de producto (PRECIO>0) más reciente que la precede, en el orden dado por
+# el campo MOVIMIENTO — NO por el orden físico en que quedan escritos los
+# registros en el DBF. Se verificó con un ticket real (vía
+# /facturacion/_debug/ticket-crudo) que ambos órdenes pueden diferir: cuando
+# un mesero agrega o corrige un modificador después del pedido original
+# (esas filas quedan con MODIFICADO=True), el DBF lo escribe al final del
+# archivo físico, pero MOVIMIENTO conserva la posición lógica real dentro
+# del ticket. Deliberadamente separada de leer_ventas_dia()/
+# construir_comprobante(): esas calculan IGV real para SUNAT y nunca deben
+# ver una línea a S/0.00. Genérica — no exclusiva de ningún módulo
+# consumidor en particular.
 def _agrupar_modificadores(lineas: list[dict]) -> list[dict]:
-    """`lineas`: filas crudas de cheqdet/tempcheqdet de UN folio, en el orden
-    físico en que aparecen en el DBF. Toda fila a S/0.00 se adjunta a la
-    línea de producto más reciente (puede haber varias seguidas: una sola
-    línea con CANTIDAD=4 puede traer 4 modificadores a continuación, uno por
+    """`lineas`: filas crudas de cheqdet/tempcheqdet de UN folio (en
+    cualquier orden de lectura). Se reordenan por MOVIMIENTO antes de
+    agrupar. Toda fila a S/0.00 se adjunta a la línea de producto más
+    reciente en esa secuencia (puede haber varias seguidas: una sola línea
+    con CANTIDAD=4 puede traer 4 modificadores a continuación, uno por
     unidad)."""
+    ordenadas = sorted(lineas, key=lambda r: _f(r.get("MOVIMIENTO")))
     items: list[dict] = []
     actual: dict | None = None
-    for r in lineas:
+    for r in ordenadas:
         if _f(r.get("PRECIO")) > 0:
             actual = {"codigo": _txt(r.get("CLAVEPROD")),
                      "cantidad": _f(r.get("CANTIDAD")) or 1, "modificadores": []}
@@ -334,32 +340,6 @@ def agrupar_lineas_con_modificadores(base_dir: str, dia: date, encoding: str,
                 "items": items,
             })
     return ventas
-
-
-# ───────────────────────── diagnóstico temporal (ver por qué un modificador
-# no se agrupó como se esperaba) — dump de TODOS los campos crudos de un
-# ticket, en el orden exacto en que dbfread los devuelve, sin ninguna lógica
-# de agrupación. Quitar una vez resuelto el caso puntual que lo motivó.
-def dump_ticket_crudo(base_dir: str, dia: date, encoding: str, numcheque: int) -> dict:
-    resultado: dict = {"numcheque": numcheque, "fuentes": []}
-    for origen, f_cab, f_det, _f_pag in _FUENTES:
-        p = os.path.join(base_dir, f_cab)
-        if not os.path.exists(p):
-            continue
-        cab = None
-        for r in _abrir(p, encoding):
-            if int(_f(r.get("NUMCHEQUE"))) == numcheque:
-                cab = {k: str(v) for k, v in dict(r).items()}
-                folio = r.get("FOLIO")
-                break
-        if cab is None:
-            continue
-        detalle = []
-        for r in _abrir(os.path.join(base_dir, f_det), encoding):
-            if r.get("FOLIODET") == folio:
-                detalle.append({k: str(v) for k, v in dict(r).items()})
-        resultado["fuentes"].append({"origen": origen, "cabecera": cab, "detalle_en_orden_de_lectura": detalle})
-    return resultado
 
 
 # ───────────────────────── nombre de forma de pago ─────────────────────────
