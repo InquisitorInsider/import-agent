@@ -336,6 +336,32 @@ def agrupar_lineas_con_modificadores(base_dir: str, dia: date, encoding: str,
     return ventas
 
 
+# ───────────────────────── diagnóstico temporal (ver por qué un modificador
+# no se agrupó como se esperaba) — dump de TODOS los campos crudos de un
+# ticket, en el orden exacto en que dbfread los devuelve, sin ninguna lógica
+# de agrupación. Quitar una vez resuelto el caso puntual que lo motivó.
+def dump_ticket_crudo(base_dir: str, dia: date, encoding: str, numcheque: int) -> dict:
+    resultado: dict = {"numcheque": numcheque, "fuentes": []}
+    for origen, f_cab, f_det, _f_pag in _FUENTES:
+        p = os.path.join(base_dir, f_cab)
+        if not os.path.exists(p):
+            continue
+        cab = None
+        for r in _abrir(p, encoding):
+            if int(_f(r.get("NUMCHEQUE"))) == numcheque:
+                cab = {k: str(v) for k, v in dict(r).items()}
+                folio = r.get("FOLIO")
+                break
+        if cab is None:
+            continue
+        detalle = []
+        for r in _abrir(os.path.join(base_dir, f_det), encoding):
+            if r.get("FOLIODET") == folio:
+                detalle.append({k: str(v) for k, v in dict(r).items()})
+        resultado["fuentes"].append({"origen": origen, "cabecera": cab, "detalle_en_orden_de_lectura": detalle})
+    return resultado
+
+
 # ───────────────────────── nombre de forma de pago ─────────────────────────
 def _nombre_pago(codigo: str, fc: dict) -> str:
     for p in fc.get("formas_pago", []):

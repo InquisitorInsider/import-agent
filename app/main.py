@@ -241,6 +241,18 @@ def fact_lineas_detalle(fecha: str = "hoy", _: None = Depends(require_lookup("fa
     return {"fecha": dia.isoformat(), "total": len(ventas), "ventas": ventas}
 
 
+@app.get("/facturacion/_debug/ticket-crudo")
+def fact_debug_ticket_crudo(numcheque: int, fecha: str = "hoy",
+                            _: None = Depends(require_lookup("facturacion"))) -> dict:
+    """TEMPORAL: dump de todos los campos crudos de un ticket, sin ninguna
+    lógica de agrupación, para diagnosticar por qué un modificador no se
+    agrupó como se esperaba. Quitar una vez resuelto."""
+    dia = _parse_fecha(fecha)
+    enc = settings.dbf_encoding()
+    base = _fact_base()
+    return facturacion.dump_ticket_crudo(base, dia, enc, numcheque)
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 #  Panel — general
 # ══════════════════════════════════════════════════════════════════════════════
