@@ -13,6 +13,9 @@ API para el facturador (runtime, token Bearer con permiso 'facturacion'):
   GET  /facturacion/ventas?fecha=hoy       -> todas las ventas del día
   GET  /facturacion/pendientes?fecha=hoy   -> ventas válidas no facturadas
   POST /facturacion/marcar                 -> marcar una venta como ya emitida
+  GET  /facturacion/lineas-detalle?fecha=hoy -> detalle de venta con modificadores
+                                              (línea de precio + sus líneas a S/0.00
+                                              agrupadas, ej. elección de pierna/pecho)
 
 Panel de importación (protegido con ADMIN_PASSWORD o usuarios guardados):
   GET  /                       -> panel web
@@ -221,6 +224,21 @@ def fact_productos(_: None = Depends(require_lookup("facturacion"))) -> dict:
     items = facturacion.productos_con_grupo(base, enc)
     items.sort(key=lambda x: (x["grupo"] is None, x["grupo"] or "", x["descripcion"] or x["codigo"]))
     return {"total": len(items), "productos": items}
+
+
+@app.get("/facturacion/lineas-detalle")
+def fact_lineas_detalle(fecha: str = "hoy", _: None = Depends(require_lookup("facturacion"))) -> dict:
+    """Detalle de venta del día CON modificadores (incluye las líneas a
+    S/0.00 agrupadas bajo su producto — ver agrupar_lineas_con_modificadores).
+    Genérico: no forma parte del cálculo de facturación electrónica, no
+    reemplaza /facturacion/ventas. Hoy solo lo consume horno-ruta80 para
+    resolver qué pieza de pollo (pierna/pecho) se vendió en cada línea."""
+    dia = _parse_fecha(fecha)
+    enc = settings.dbf_encoding()
+    base = _fact_base()
+    prods = facturacion.cargar_productos(os.path.join(base, "productos.dbf"), enc)
+    ventas = facturacion.agrupar_lineas_con_modificadores(base, dia, enc, prods)
+    return {"fecha": dia.isoformat(), "total": len(ventas), "ventas": ventas}
 
 
 # ══════════════════════════════════════════════════════════════════════════════

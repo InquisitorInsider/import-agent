@@ -267,6 +267,75 @@ def ventas_del_dia(base_dir: str, dia: date, encoding: str) -> list:
     return sorted(set(nums))
 
 
+# ───────────────────────── detalle con modificadores (aislado de facturación) ─────
+# Lee cheqdet/tempcheqdet SIN el filtro PRECIO>0 y agrupa cada línea a S/0.00
+# (modificador, ej. elección de pierna/pecho, sabor, guarnición) bajo la línea
+# de producto (PRECIO>0) más reciente que la precede — el POS no vincula el
+# modificador a su producto con ningún campo explícito, solo con el orden
+# físico en que quedan escritos los registros del ticket (confirmado
+# inspeccionando cheqdet.dbf directamente). Deliberadamente separada de
+# leer_ventas_dia()/construir_comprobante(): esas calculan IGV real para
+# SUNAT y nunca deben ver una línea a S/0.00. Genérica — no exclusiva de
+# ningún módulo consumidor en particular.
+def _agrupar_modificadores(lineas: list[dict]) -> list[dict]:
+    """`lineas`: filas crudas de cheqdet/tempcheqdet de UN folio, en el orden
+    físico en que aparecen en el DBF. Toda fila a S/0.00 se adjunta a la
+    línea de producto más reciente (puede haber varias seguidas: una sola
+    línea con CANTIDAD=4 puede traer 4 modificadores a continuación, uno por
+    unidad)."""
+    items: list[dict] = []
+    actual: dict | None = None
+    for r in lineas:
+        if _f(r.get("PRECIO")) > 0:
+            actual = {"codigo": _txt(r.get("CLAVEPROD")),
+                     "cantidad": _f(r.get("CANTIDAD")) or 1, "modificadores": []}
+            items.append(actual)
+        elif actual is not None:
+            actual["modificadores"].append({"codigo": _txt(r.get("CLAVEPROD"))})
+        # una línea a S/0.00 sin producto previo en este folio es anómala y
+        # se descarta silenciosamente (no hay a qué línea adjuntarla)
+    return items
+
+
+def agrupar_lineas_con_modificadores(base_dir: str, dia: date, encoding: str,
+                                     productos: dict) -> list[dict]:
+    """Detalle de todas las ventas de un día (vigente+cerrado, no anuladas,
+    con NUMCHEQUE>0 — mismos criterios de cabecera que leer_ventas_dia), pero
+    SIN filtrar el detalle por precio: cada ítem vendido trae su lista de
+    modificadores agrupados (ver _agrupar_modificadores)."""
+    ventas: list[dict] = []
+    for origen, f_cab, f_det, _f_pag in _FUENTES:
+        p = os.path.join(base_dir, f_cab)
+        if not os.path.exists(p):
+            continue
+        cabs = {}
+        for r in _abrir(p, encoding):
+            fec = r.get("FECHA")
+            fd = fec.date() if isinstance(fec, datetime) else fec
+            if fd == dia and not r.get("CANCELADO") and int(_f(r.get("NUMCHEQUE"))) > 0:
+                cabs[r.get("FOLIO")] = dict(r)
+        if not cabs:
+            continue
+        det_by: dict = {}
+        for r in _abrir(os.path.join(base_dir, f_det), encoding):
+            fo = r.get("FOLIODET")
+            if fo in cabs:
+                det_by.setdefault(fo, []).append(dict(r))
+        for fo, cab in cabs.items():
+            items = _agrupar_modificadores(det_by.get(fo, []))
+            for it in items:
+                it["descripcion"] = productos.get(it["codigo"], {}).get("desc") or f"PRODUCTO {it['codigo']}"
+                for m in it["modificadores"]:
+                    m["descripcion"] = productos.get(m["codigo"], {}).get("desc") or m["codigo"]
+            ventas.append({
+                "origen": origen,
+                "numcheque": int(_f(cab.get("NUMCHEQUE"))),
+                "anulado": bool(cab.get("CANCELADO")),
+                "items": items,
+            })
+    return ventas
+
+
 # ───────────────────────── nombre de forma de pago ─────────────────────────
 def _nombre_pago(codigo: str, fc: dict) -> str:
     for p in fc.get("formas_pago", []):
